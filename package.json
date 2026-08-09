@@ -5,8 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "did": "tsx --env-file=.env src/scripts/01-did.ts",    "template": "tsx src/scripts/02-create-template.ts",
-    "issue": "tsx src/scripts/03-issue.ts",
+    "did": "tsx --env-file=.env src/scripts/01-did.ts",   
+    "template": "tsx --env-file=.env src/scripts/02-template.ts",   
+     "issue": "tsx src/scripts/03-issue.ts",
     "verify": "tsx src/scripts/04-verify.ts",
     "revoke": "tsx src/scripts/05-revoke.ts"
 

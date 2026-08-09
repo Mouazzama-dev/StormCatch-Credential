@@ -13,4 +13,5 @@ export const config = {
   walletId: required("PARADYM_WALLET_ID"),
   baseUrl: process.env.PARADYM_BASE_URL ?? "https://api.paradym.id",
   didId: required("PARADYM_DID_ID"),
+  payloadTemplateId: required("PARADYM_PAYLOAD_TEMPLATE_ID"),
 };
