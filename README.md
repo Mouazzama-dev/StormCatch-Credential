@@ -134,3 +134,77 @@ and ngrok.
 
 The pipeline walks through issue → verify (pass) → revoke → verify (fail),
 pausing for you to scan each QR with the Paradym Wallet.
+
+---
+ 
+## Scope-gated authorization (TaskAuthorizationCredential)
+ 
+`TaskAuthorizationCredential` carries a numeric `scope`. A gate is a
+presentation template that requires `scope` to be at least some minimum
+(`minimum: N`). Because `scope` is a number, the same credential can pass one
+gate and fail another purely on the scope policy — separate from expiry or
+revocation.
+ 
+The `task-demo` pipeline runs, in order:
+ 
+1. Issue a `scope: 2` credential, verify it at a **min-scope-2** gate → **pass**.
+2. Issue a `scope: 1` credential.
+3. **Test A** — present the `scope: 1` credential at the **min-scope-2** gate →
+   expected **fail** (insufficient scope, nothing revoked).
+4. **Test B** — present the same `scope: 1` credential at a **min-scope-1** gate
+   → expected **pass** (same credential, lower gate).
+5. **Revoke** the `scope: 2` credential, verify again → **fail** (revoked).
+The revoke test runs last on purpose, so no earlier scope test can be affected
+by a revoked credential — keeping the two failure causes (insufficient scope vs.
+revoked) cleanly separated.
+ 
+```mermaid
+sequenceDiagram
+    participant S as Demo script
+    participant P as Paradym (verifier)
+    participant W as Wallet (phone)
+ 
+    Note over S,W: scope-1 credential in wallet
+    S->>P: verification/request (gate: min scope 2)
+    W->>P: present scope-1 credential (OID4VP)
+    P-->>S: FAIL — scope 1 does not satisfy min scope 2
+    S->>P: verification/request (gate: min scope 1)
+    W->>P: present same scope-1 credential (OID4VP)
+    P-->>S: PASS — scope 1 satisfies min scope 1
+```
+ 
+---
+ 
+## Notes and findings
+ 
+- **Expiry is enforced wallet-side.** A credential whose `validUntil` is already
+  in the past is rejected by the wallet at issuance — it never reaches
+  verification. So an "expired credential fails at verification" flow can't be
+  shown end-to-end; the wallet blocks it earlier. The main templates still set a
+  real `validUntil` (`future: { days: 1 }`); note that `future` accepts
+  `days`/`months`/`years` but not `minutes`/`hours`.
+- **Scope `minimum` enforcement — to confirm.** Whether the gate's
+  `minimum` on `scope` is enforced by Paradym at verification (vs. only advisory)
+  still needs confirming with a clean run; when presenting, make sure the
+  intended credential is the one selected in the wallet.
+- **Free-tier transaction limit.** Each template, issuance offer, and
+  verification request counts as one transaction (Free plan caps at 100). Avoid
+  re-creating presentation templates on every run — create the gate templates
+  once and reuse their ids.
+---
+ 
+## Running the demo
+ 
+Prerequisites: Node 20+, pnpm, a Paradym account (API key + wallet id + DID),
+and ngrok.
+ 
+1. Start ngrok: `ngrok http 3000`
+2. Register the webhook to the ngrok URL:
+   `pnpm register-webhook https://<your>.ngrok-free.dev`
+3. Run a pipeline:
+   - `pnpm demo` — payload lifecycle: issue → verify (pass) → revoke → verify (fail)
+   - `pnpm task-demo` — task authorization: scope-gated verify + revoke
+Both pipelines pause for you to scan each QR with the Paradym Wallet. Delete any
+old Stormcatch cards from the wallet first, so the right credential is selected
+when presenting.
+ 
