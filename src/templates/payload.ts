@@ -18,6 +18,8 @@ export const payloadTemplateDefinition = {
   issuer: "did:web",
   type: "StormcatchPayloadCredential",
   revocable: true,
+  validFrom: new Date().toISOString().split("T")[0],
+  validUntil: { start: "validFrom", future: { days: 1 } },
   background: { color: "#1a1a2e" },
   text: { color: "#ffffff" },
   attributes: {

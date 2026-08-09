@@ -69,7 +69,11 @@ if (options.verbose) {
         resolver(false, {});
       }
     }
-
+    // Notify anyone waiting on an issuance to complete
+    if (eventType === "openid4vc.issuance.completed") {
+      const issuanceId = body?.payload?.openId4VcIssuanceId;
+      if (issuanceId) resolveIssuance(issuanceId);
+    }
     res.status(200).json({ received: true });
   });
 
@@ -97,4 +101,30 @@ export function waitForVerification(
       resolve({ verified, attributes });
     });
   });
+}
+
+const pendingIssuance = new Map<string, () => void>();
+
+// Wait until an issuance session completes (credential accepted into wallet)
+export function waitForIssuance(issuanceId: string, timeoutMs = 120000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingIssuance.delete(issuanceId);
+      reject(new Error(`Timed out waiting for issuance ${issuanceId}`));
+    }, timeoutMs);
+
+    pendingIssuance.set(issuanceId, () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+// Called by the webhook handler when an issuance completes
+export function resolveIssuance(issuanceId: string) {
+  const resolver = pendingIssuance.get(issuanceId);
+  if (resolver) {
+    pendingIssuance.delete(issuanceId);
+    resolver();
+  }
 }
