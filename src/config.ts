@@ -14,4 +14,7 @@ export const config = {
   baseUrl:"https://api.paradym.id",
   didId: required("PARADYM_DID_ID"),
   payloadTemplateId: required("PARADYM_PAYLOAD_TEMPLATE_ID"),
+  payloadType: required("PARADYM_PAYLOAD_TYPE"),
+  presentationTemplateId: required("PARADYM_PRESENTATION_TEMPLATE_ID"),
 };
+

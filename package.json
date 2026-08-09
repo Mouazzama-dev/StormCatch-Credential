@@ -5,12 +5,13 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "did": "tsx --env-file=.env src/scripts/01-did.ts",   
-    "template": "tsx --env-file=.env src/scripts/02-template.ts",   
+    "did": "tsx --env-file=.env src/scripts/01-did.ts",
+    "template": "tsx --env-file=.env src/scripts/02-template.ts",
     "issue": "tsx --env-file=.env src/scripts/03-issue.ts",
-    "verify": "tsx src/scripts/04-verify.ts",
-    "revoke": "tsx src/scripts/05-revoke.ts"
-
+    "verify": "tsx --env-file=.env src/scripts/04b-verify.ts",    "revoke": "tsx --env-file=.env src/scripts/05-revoke.ts",
+    "webhook": "tsx --env-file=.env src/scripts/webhook-test.ts",
+    "register-webhook": "tsx --env-file=.env src/scripts/register-webhook.ts",
+    "presentation-template": "tsx --env-file=.env src/scripts/04a-presentation-template.ts"
   },
   "keywords": [],
   "author": "",
@@ -24,11 +25,13 @@
   },
   "type": "module",
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.2.0",
     "tsx": "^4.23.11",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
   }
 }
