@@ -1,5 +1,8 @@
 import express from "express";
 
+type PendingResolver = (verified: boolean, attributes: Record<string, unknown>) => void;
+const pending = new Map<string, PendingResolver>();
+
 export interface VerificationResult {
   event: string;
   sessionId: string;
@@ -23,8 +26,11 @@ export function summarizeVerification(body: any) {
 
 type ResultHandler = (result: VerificationResult) => void;
 
-export function startWebhookServer(port: number, onResult: ResultHandler) {
-  const app = express();
+export function startWebhookServer(
+  port: number,
+  onResult: ResultHandler,
+  options: { verbose?: boolean } = {}
+) {  const app = express();
   app.use(express.json());
 
   app.get("/", (_req, res) => {
@@ -33,9 +39,10 @@ export function startWebhookServer(port: number, onResult: ResultHandler) {
 
   app.post("/webhook", (req, res) => {
     const body = req.body;
-    console.log("\n📩 Webhook received:");
-    console.log(JSON.stringify(body, null, 2));
-
+if (options.verbose) {
+      console.log("\n📩 Webhook received:");
+      console.log(JSON.stringify(body, null, 2));
+    }
     const eventType = body?.eventType ?? "unknown";
     const verification = body?.payload?.openId4VcVerification;
     const sessionId =
@@ -47,6 +54,22 @@ export function startWebhookServer(port: number, onResult: ResultHandler) {
       raw: body,
     });
 
+    // Notify anyone waiting on this specific session's final result
+    if (eventType === "openid4vc.verification.data") {
+      const resolver = pending.get(sessionId);
+      if (resolver) {
+        pending.delete(sessionId);
+        resolver(true, verification?.credentials?.[0]?.presentedAttributes ?? {});
+      }
+    }
+    if (eventType === "openid4vc.verification.failed") {
+      const resolver = pending.get(sessionId);
+      if (resolver) {
+        pending.delete(sessionId);
+        resolver(false, {});
+      }
+    }
+
     res.status(200).json({ received: true });
   });
 
@@ -55,4 +78,23 @@ export function startWebhookServer(port: number, onResult: ResultHandler) {
   });
 
   return server;
+}
+
+// Wait for a verification result (data or failed) for a specific session.
+// Resolves with { verified: boolean, attributes } once the webhook fires.
+export function waitForVerification(
+  sessionId: string,
+  timeoutMs = 120000
+): Promise<{ verified: boolean; attributes: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pending.delete(sessionId);
+      reject(new Error(`Timed out waiting for verification ${sessionId}`));
+    }, timeoutMs);
+
+    pending.set(sessionId, (verified, attributes) => {
+      clearTimeout(timer);
+      resolve({ verified, attributes });
+    });
+  });
 }

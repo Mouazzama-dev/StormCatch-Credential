@@ -12,7 +12,8 @@
     "revoke": "tsx --env-file=.env src/scripts/05-revoke.ts",    
     "webhook": "tsx --env-file=.env src/scripts/webhook-test.ts",
     "register-webhook": "tsx --env-file=.env src/scripts/register-webhook.ts",
-    "presentation-template": "tsx --env-file=.env src/scripts/04a-presentation-template.ts"
+    "presentation-template": "tsx --env-file=.env src/scripts/04a-presentation-template.ts",
+    "demo": "tsx --env-file=.env src/scripts/run-all.ts"
   },
   "keywords": [],
   "author": "",
