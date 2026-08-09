@@ -8,7 +8,8 @@
     "did": "tsx --env-file=.env src/scripts/01-did.ts",
     "template": "tsx --env-file=.env src/scripts/02-template.ts",
     "issue": "tsx --env-file=.env src/scripts/03-issue.ts",
-    "verify": "tsx --env-file=.env src/scripts/04b-verify.ts",    "revoke": "tsx --env-file=.env src/scripts/05-revoke.ts",
+    "verify": "tsx --env-file=.env src/scripts/04b-verify.ts",    
+    "revoke": "tsx --env-file=.env src/scripts/05-revoke.ts",    
     "webhook": "tsx --env-file=.env src/scripts/webhook-test.ts",
     "register-webhook": "tsx --env-file=.env src/scripts/register-webhook.ts",
     "presentation-template": "tsx --env-file=.env src/scripts/04a-presentation-template.ts"
