@@ -16,5 +16,7 @@ export const config = {
   payloadTemplateId: required("PARADYM_PAYLOAD_TEMPLATE_ID"),
   payloadType: required("PARADYM_PAYLOAD_TYPE"),
   presentationTemplateId: required("PARADYM_PRESENTATION_TEMPLATE_ID"),
+  taskAuthTemplateId: required("PARADYM_TASKAUTH_TEMPLATE_ID"),
+  taskAuthType: required("PARADYM_TASKAUTH_TYPE"),
 };
 

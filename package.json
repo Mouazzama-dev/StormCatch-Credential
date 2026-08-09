@@ -13,7 +13,9 @@
     "webhook": "tsx --env-file=.env src/scripts/webhook-test.ts",
     "register-webhook": "tsx --env-file=.env src/scripts/register-webhook.ts",
     "presentation-template": "tsx --env-file=.env src/scripts/04a-presentation-template.ts",
-    "demo": "tsx --env-file=.env src/scripts/run-all.ts"
+    "demo": "tsx --env-file=.env src/scripts/run-all.ts",
+    "task-template": "tsx --env-file=.env src/scripts/task-template.ts",
+    "task-demo": "tsx --env-file=.env src/scripts/task-demo.ts"
   },
   "keywords": [],
   "author": "",
