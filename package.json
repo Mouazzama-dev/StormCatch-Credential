@@ -15,7 +15,9 @@
     "presentation-template": "tsx --env-file=.env src/scripts/04a-presentation-template.ts",
     "demo": "tsx --env-file=.env src/scripts/run-all.ts",
     "task-template": "tsx --env-file=.env src/scripts/task-template.ts",
-    "task-demo": "tsx --env-file=.env src/scripts/task-demo.ts"
+    "task-demo": "tsx --env-file=.env src/scripts/task-demo.ts",
+    "task-setup": "tsx --env-file=.env src/scripts/task-setup.ts",
+    "scope-check": "tsx --env-file=.env src/scripts/scope-check.ts"
   },
   "keywords": [],
   "author": "",

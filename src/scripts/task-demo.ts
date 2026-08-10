@@ -5,6 +5,7 @@ import { getIssuedCredentialId } from "../credentials/issue.ts";
 import { revokeCredentials } from "../credentials/revoke.ts";
 import { requestVerification } from "../credentials/verify.ts";
 import { startWebhookServer, waitForVerification, waitForIssuance } from "../webhook/server.ts";
+import { config } from "../config.ts";
 
 const PORT = 3000;
 
@@ -20,9 +21,13 @@ async function main() {
   startWebhookServer(PORT, () => {});
   console.log("🌐 Webhook server started on port", PORT, "\n");
 
-  // Two gates: one requiring scope >= 2, one requiring scope >= 1
-  const gate2 = await createTaskAuthPresentationTemplate(2);
-  const gate1 = await createTaskAuthPresentationTemplate(1);
+  if (!config.gate2TemplateId || !config.gate1TemplateId) {
+    throw new Error("Gate templates missing — run `pnpm task-setup` first and add the IDs to .env");
+  }
+
+// Reuse gate templates from .env (created once via `pnpm task-setup`)
+  const gate2 = { id: config.gate2TemplateId };
+  const gate1 = { id: config.gate1TemplateId };
   console.log("Gate (min scope 2):", gate2.id);
   console.log("Gate (min scope 1):", gate1.id);
 
@@ -59,8 +64,7 @@ async function main() {
   const a = await verifyWith(gate2.id);
   console.log("   Present the SCOPE-1 credential:\n   " + a.authorizationRequestUri);
   const ra = await waitForVerification(a.id);
-  console.log(`\n   → verified: ${ra.verified}`);
-  if (ra.verified) throw new Error("Expected FAIL: scope 1 should not satisfy gate-2");
+  console.log(`\n   → verified: ${ra.verified} | scope presented: ${ra.attributes.scope}`);  if (ra.verified) throw new Error("Expected FAIL: scope 1 should not satisfy gate-2");
   console.log("   ✅ As expected: scope 1 is insufficient for a zone-level-2 gate.");
   console.log("      (Failure is from the scope policy — nothing is revoked yet.)");
 

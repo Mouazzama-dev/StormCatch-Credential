@@ -2,7 +2,7 @@ import { paradymFetch, walletPath } from "../client.ts";
 import { config } from "../config.ts";
 
 // Issue a TaskAuthorization credential with a given action + scope
-export async function issueTaskAuth(action: string, scope: number) {
+export async function issueTaskAuth(action: string, scope: string) {
   return paradymFetch<{ id: string; offerUri: string }>(
     walletPath("/openid4vc/issuance/offer"),
     {
@@ -20,19 +20,19 @@ export async function issueTaskAuth(action: string, scope: number) {
 }
 
 // Create a presentation template that requests the task-auth credential,
-// optionally requiring scope to be at least `minScope` (gate policy).
-export async function createTaskAuthPresentationTemplate(minScope?: number) {
+// optionally requiring an exact scope value (gate policy).
+export async function createTaskAuthPresentationTemplate(requiredScope?: string) {
   const scopeAttr =
-    minScope !== undefined
-      ? { type: "number", minimum: minScope }
-      : { type: "number" };
+    requiredScope !== undefined
+      ? { type: "string", value: requiredScope }
+      : { type: "string" };
 
   return paradymFetch<{ id: string }>(
     walletPath("/templates/presentations"),
     {
       method: "POST",
       body: JSON.stringify({
-        name: `Stormcatch Zone Access (min scope ${minScope ?? "any"})`,
+        name: `Stormcatch Zone Access (scope ${requiredScope ?? "any"})`,
         description: "Verify the robot is authorized for zone access",
         credentials: [
           {

@@ -28,9 +28,9 @@ export const taskAuthTemplateDefinition = {
       alwaysDisclosed: false,
     },
     scope: {
-      type: "number",
+      type: "string",
       name: "Scope",
-      description: "The scope level the action is permitted up to (e.g. zone level)",
+      description: "Facility-defined scope for the action (e.g. zone \"1\", \"2\", \"3\")",
       required: true,
       alwaysDisclosed: false,
     },
