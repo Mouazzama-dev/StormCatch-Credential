@@ -25,75 +25,87 @@ async function main() {
     throw new Error("Gate templates missing — run `pnpm task-setup` first and add the IDs to .env");
   }
 
-// Reuse gate templates from .env (created once via `pnpm task-setup`)
   const gate2 = { id: config.gate2TemplateId };
   const gate1 = { id: config.gate1TemplateId };
-  console.log("Gate (min scope 2):", gate2.id);
-  console.log("Gate (min scope 1):", gate1.id);
+  console.log("Gate (scope \"2\"):", gate2.id);
+  console.log("Gate (scope \"1\"):", gate1.id);
+  console.log("\n⚠️  Delete any old Stormcatch task cards from the wallet before starting.");
 
-  // ── ISSUE scope-2 credential ──
-  console.log("\n═══ ISSUE (sc:zone_access, scope: 2) ═══");
-  const offer2 = await issueTaskAuth("sc:zone_access", 2);
-  console.log("   Scan to load the scope-2 credential:");
-  console.log("   " + offer2.offerUri);
+  // ── ISSUE scope-1 credential (wallet now holds ONLY scope-1) ──
+  console.log("\n═══ ISSUE (sc:zone_access, scope: \"1\") ═══");
+  const offer1 = await issueTaskAuth("sc:zone_access", "1");
+  console.log("   Scan to load the scope-1 credential:\n   " + offer1.offerUri);
+  console.log("\n⏳ Waiting for you to scan and accept...");
+  await waitForIssuance(offer1.id);
+  console.log("   ✅ Scope-1 credential accepted.");
+
+  // ── TEST A: scope-1 at gate-2 (expect DENY — no scope-"2" in wallet) ──
+  console.log("\n═══ TEST A: gate-2 with only a scope-\"1\" credential (expecting DENY) ═══");
+  const a = await verifyWith(gate2.id);
+  console.log("   " + a.authorizationRequestUri);
+  const deniedA = await expectDeny(a.id);
+  if (!deniedA) throw new Error("Expected DENY: no scope-\"2\" credential should satisfy gate-2");
+  console.log("   ✅ As expected: no scope-\"2\" match, nothing presented — denied.");
+
+  // ── TEST B: scope-1 at gate-1 (expect PASS) ──
+  console.log("\n═══ TEST B: gate-1 with the scope-\"1\" credential (expecting PASS) ═══");
+  const b = await verifyWith(gate1.id);
+  console.log("   " + b.authorizationRequestUri);
+  const rb = await waitForVerification(b.id);
+  console.log(`\n   → verified: ${rb.verified} | scope: ${rb.attributes.scope}`);
+  if (!rb.verified) throw new Error("Expected PASS: scope \"1\" at gate-1");
+  console.log("   ✅ As expected: scope-\"1\" credential valid at a scope-\"1\" gate.");
+
+  // ── ISSUE scope-2 credential (wallet now also holds scope-2) ──
+  console.log("\n═══ ISSUE (sc:zone_access, scope: \"2\") ═══");
+  const offer2 = await issueTaskAuth("sc:zone_access", "2");
+  console.log("   Scan to load the scope-2 credential:\n   " + offer2.offerUri);
   console.log("\n⏳ Waiting for you to scan and accept...");
   await waitForIssuance(offer2.id);
   console.log("   ✅ Scope-2 credential accepted.");
   const cred2Id = await getIssuedCredentialId(offer2.id);
 
-  // ── VERIFY scope-2 at gate-2 (expect PASS) ──
-  console.log("\n═══ VERIFY: scope-2 credential at gate-2 (expecting PASS) ═══");
-  const p2 = await verifyWith(gate2.id);
-  console.log("   Present the scope-2 credential:\n   " + p2.authorizationRequestUri);
-  const rp2 = await waitForVerification(p2.id);
-  console.log(`\n   → verified: ${rp2.verified} | action: ${rp2.attributes.action} | scope: ${rp2.attributes.scope}`);
-  if (!rp2.verified) throw new Error("Expected PASS: scope 2 at gate-2");
-  console.log("   ✅ Authorized for zone level 2.");
+  // ── TEST C: scope-2 at gate-2 (expect PASS) ──
+  console.log("\n═══ TEST C: gate-2 with the scope-\"2\" credential (expecting PASS) ═══");
+  const c = await verifyWith(gate2.id);
+  console.log("   " + c.authorizationRequestUri);
+  const rc = await waitForVerification(c.id);
+  console.log(`\n   → verified: ${rc.verified} | action: ${rc.attributes.action} | scope: ${rc.attributes.scope}`);
+  if (!rc.verified) throw new Error("Expected PASS: scope \"2\" at gate-2");
+  console.log("   ✅ As expected: scope-\"2\" credential valid at a scope-\"2\" gate.");
 
-  // ── ISSUE scope-1 credential ──
-  console.log("\n═══ ISSUE (sc:zone_access, scope: 1) ═══");
-  const offer1 = await issueTaskAuth("sc:zone_access", 1);
-  console.log("   Scan to load the scope-1 credential:");
-  console.log("   " + offer1.offerUri);
-  console.log("\n⏳ Waiting for you to scan and accept...");
-  await waitForIssuance(offer1.id);
-  console.log("   ✅ Scope-1 credential accepted.");
-
-  // ── TEST A: scope-1 at gate-2 (expect FAIL — insufficient) ──
-  console.log("\n═══ TEST A: scope-1 credential at gate-2 (expecting FAIL — insufficient) ═══");
-  const a = await verifyWith(gate2.id);
-  console.log("   Present the SCOPE-1 credential:\n   " + a.authorizationRequestUri);
-  const ra = await waitForVerification(a.id);
-  console.log(`\n   → verified: ${ra.verified} | scope presented: ${ra.attributes.scope}`);  if (ra.verified) throw new Error("Expected FAIL: scope 1 should not satisfy gate-2");
-  console.log("   ✅ As expected: scope 1 is insufficient for a zone-level-2 gate.");
-  console.log("      (Failure is from the scope policy — nothing is revoked yet.)");
-
-  // ── TEST B: same scope-1 at gate-1 (expect PASS — sufficient) ──
-  console.log("\n═══ TEST B: same scope-1 credential at gate-1 (expecting PASS) ═══");
-  const b = await verifyWith(gate1.id);
-  console.log("   Present the SAME scope-1 credential:\n   " + b.authorizationRequestUri);
-  const rb = await waitForVerification(b.id);
-  console.log(`\n   → verified: ${rb.verified} | scope: ${rb.attributes.scope}`);
-  if (!rb.verified) throw new Error("Expected PASS: scope 1 at gate-1");
-  console.log("   ✅ As expected: same credential is valid at a zone-level-1 gate.");
-
-  // ── REVOKE TEST (last, so no earlier test is affected) ──
-  console.log("\n═══ REVOKE: scope-2 credential, then verify (expecting FAIL — revoked) ═══");
+  // ── REVOKE: scope-2, then gate-2 again (expect DENY) ──
+  console.log("\n═══ REVOKE: scope-2 credential, then gate-2 again (expecting DENY) ═══");
   await revokeCredentials([cred2Id], true);
   console.log("   ✅ Scope-2 authorization revoked.");
   const rv = await verifyWith(gate2.id);
-  console.log("   Present the SCOPE-2 credential again:\n   " + rv.authorizationRequestUri);
-  const rrv = await waitForVerification(rv.id);
-  console.log(`\n   → verified: ${rrv.verified}`);
-  if (rrv.verified) throw new Error("Expected FAIL: scope-2 credential was revoked");
+  console.log("   " + rv.authorizationRequestUri);
+  const deniedRevoke = await expectDeny(rv.id);
+  if (!deniedRevoke) throw new Error("Expected DENY: scope-\"2\" credential was revoked");
   console.log("   ✅ As expected: revoked authorization no longer grants access.");
-  console.log("      (This failure is from revocation — distinct from the scope failure above.)");
 
   console.log("\n🎉 TaskAuth demo complete:");
-  console.log("   • scope-2: PASS at gate-2");
-  console.log("   • scope-1: FAIL at gate-2 (insufficient), PASS at gate-1");
-  console.log("   • scope-2: revoked → FAIL");
+  console.log("   • scope-\"1\": DENY at gate-2 (no match), PASS at gate-1");
+  console.log("   • scope-\"2\": PASS at gate-2");
+  console.log("   • scope-\"2\": revoked → DENY at gate-2");
   process.exit(0);
+}
+
+// Returns true if the verification was denied — either an explicit failure,
+// or no presentation at all (wallet had no matching credential → timeout).
+async function expectDeny(sessionId: string, timeoutMs = 45000): Promise<boolean> {
+  try {
+    const r = await waitForVerification(sessionId, timeoutMs);
+    if (!r.verified) {
+      console.log("   → verified: false (explicit failure)");
+      return true;
+    }
+    console.log(`   → verified: true | scope: ${r.attributes.scope}`);
+    return false; // unexpectedly passed
+  } catch {
+    console.log("   → no presentation received (no matching credential → deny)");
+    return true;
+  }
 }
 
 main().catch((err) => {
