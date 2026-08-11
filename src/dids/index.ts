@@ -31,3 +31,9 @@ export async function getIssuerDid(didId: string): Promise<Did> {
   }
   return found;
 }
+
+
+// List existing sd-jwt-vc credential templates in the wallet
+export async function listCredentialTemplates(): Promise<unknown> {
+  return paradymFetch(walletPath("/templates/credentials/sd-jwt-vc"));
+}
