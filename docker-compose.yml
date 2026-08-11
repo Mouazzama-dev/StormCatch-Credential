@@ -1,0 +1,18 @@
+services:
+  facility:
+    build: .
+    command: pnpm exec tsx src/services/facility/server.ts
+    env_file: .env
+    environment:
+      FACILITY_PORT: 4001
+    ports:
+      - "4001:4001"
+
+  gate:
+    build: .
+    command: pnpm exec tsx src/services/gate/server.ts
+    env_file: .env
+    environment:
+      GATE_PORT: 4002
+    ports:
+      - "4002:4002"
