@@ -17,7 +17,8 @@
     "task-template": "tsx --env-file=.env src/scripts/task-template.ts",
     "task-demo": "tsx --env-file=.env src/scripts/task-demo.ts",
     "task-setup": "tsx --env-file=.env src/scripts/task-setup.ts",
-    "scope-check": "tsx --env-file=.env src/scripts/scope-check.ts"
+    "scope-check": "tsx --env-file=.env src/scripts/scope-check.ts",
+    "trust-setup": "tsx --env-file=.env src/scripts/trust-setup.ts"
   },
   "keywords": [],
   "author": "",

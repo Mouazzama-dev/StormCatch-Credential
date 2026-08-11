@@ -20,5 +20,6 @@ export const config = {
   taskAuthType: required("PARADYM_TASKAUTH_TYPE"),
   gate2TemplateId: process.env.PARADYM_GATE2_TEMPLATE_ID ?? "",
   gate1TemplateId: process.env.PARADYM_GATE1_TEMPLATE_ID ?? "",
+  trustedEntityId: process.env.PARADYM_TRUSTED_ENTITY_ID ?? "",
 };
 

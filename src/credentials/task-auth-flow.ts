@@ -39,7 +39,7 @@ export async function createTaskAuthPresentationTemplate(requiredScope?: string)
             name: "Task Authorization",
             format: "sd-jwt-vc",
             type: config.taskAuthType,
-            trustedIssuers: [],
+            trustedIssuers: config.trustedEntityId ? [config.trustedEntityId] : [],
             attributes: {
               action: { type: "string" },
               scope: scopeAttr,
