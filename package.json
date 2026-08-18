@@ -21,7 +21,8 @@
     "trust-setup": "tsx --env-file=.env src/scripts/trust-setup.ts",
     "facility": "tsx --env-file=.env src/services/facility/server.ts",
     "gate": "tsx --env-file=.env src/services/gate/server.ts",
-        "gate-demo": "tsx --env-file=.env src/scripts/gate-demo.ts"
+    "gate-demo": "tsx --env-file=.env src/scripts/gate-demo.ts",
+    "decision": "tsx --env-file=.env src/services/decision/server.ts"
   },
   "keywords": [],
   "author": "",

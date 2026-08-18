@@ -3,32 +3,26 @@ import type { Request, Response } from "express";
 import { paradymFetch, walletPath } from "../../client.ts";
 import { config } from "../../config.ts";
 
-// gate-service: the verifier (checkpoint). Creates a verification request,
-// receives the presentation result via webhook, runs the decision pipeline
-// (trust / deny / policy / identity), and exposes the outcome via GET /result/:id.
-// trust/deny/identity are assumption-based sockets for now (RDI/MIL fill later).
+// gate-service: the verifier (checkpoint). Creates a verification request, receives the
+// presentation via webhook, then delegates the allow/deny decision to the policy engine
+// (through the decision-service). Paradym handles signature + revocation (isValid); the
+// engine handles policy (Layer 1 + trust + deny + Cedar).
 const PORT = Number(process.env.GATE_PORT ?? 4002);
+const DECISION_URL = process.env.DECISION_URL ?? "http://localhost:4003";
 
-// Which presentation template each gate uses (ids come from .env via config).
+// Which presentation template each gate uses (ids from .env via config).
 const GATE_TEMPLATES: Record<string, string> = {
   "G-1": config.gate1TemplateId,
   "G-2": config.gate2TemplateId,
 };
 
-// What each gate requires (facility policy, assumption-based for now).
-const GATE_POLICY: Record<string, { action: string; scope: string }> = {
-  "G-1": { action: "sc:zone_access", scope: "1" },
-  "G-2": { action: "sc:zone_access", scope: "2" },
-};
-
-// If no presentation arrives within this window, treat it as DENY
-// (wallet had no matching credential -> silent no-presentation).
+// If no presentation arrives within this window, treat it as DENY.
 const DENY_TIMEOUT_MS = 45_000;
 
 type Outcome =
   | { status: "pending"; startedAt: number; gate: string }
-  | { status: "allowed"; attributes: Record<string, unknown>; checks: Record<string, boolean> }
-  | { status: "denied"; reason: string; checks?: Record<string, boolean> };
+  | { status: "allowed"; attributes: Record<string, unknown>; determiningPolicies?: string[] }
+  | { status: "denied"; reason: string; determiningPolicies?: string[] };
 
 const results = new Map<string, Outcome>();
 
@@ -37,20 +31,30 @@ app.use(express.json());
 
 app.get("/health", (_req: Request, res: Response) => res.json({ service: "gate", ok: true }));
 
-// ── Decision pipeline sockets (assumption-based; RDI/MIL fill these later) ──
-function trustListCheck(_issuer: unknown): boolean {
-  return true; // TODO: real trust list — issuer authorised for (frame, value)
-}
-function denyListCheck(_attributes: Record<string, unknown>): boolean {
-  return false; // TODO: real deny list — return true if denied
-}
-function identityCheck(_attributes: Record<string, unknown>): boolean {
-  return true; // TODO: MIL identity governance
-}
-function policyCheck(gate: string, attributes: Record<string, unknown>): boolean {
-  const p = GATE_POLICY[gate];
-  if (!p) return false;
-  return attributes.action === p.action && attributes.scope === p.scope;
+// Ask the policy engine (via decision-service) whether this presentation passes the gate.
+async function decideViaEngine(
+  gate: string,
+  attributes: Record<string, unknown>
+): Promise<Outcome> {
+  const res = await fetch(`${DECISION_URL}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pointId: gate,
+      action: attributes.action,
+      scope: attributes.scope,
+      validUntil: attributes.exp,
+    }),
+  });
+  if (!res.ok) throw new Error(`decision-service ${res.status}: ${await res.text()}`);
+  const d = (await res.json()) as {
+    allowed: boolean;
+    decision?: string;
+    determiningPolicies?: string[];
+  };
+  return d.allowed
+    ? { status: "allowed", attributes, determiningPolicies: d.determiningPolicies }
+    : { status: "denied", reason: d.decision ?? "policy", determiningPolicies: d.determiningPolicies };
 }
 
 // Start a verification at a gate. Returns the URI the robot scans.
@@ -86,23 +90,26 @@ app.post("/webhook", (req: Request, res: Response) => {
     const existing = results.get(sessionId);
     const gate = existing && "gate" in existing ? existing.gate : "G-1";
 
-    // ── Decision pipeline ──
-    const checks = {
-      verified: cred?.isValid ?? false,
-      trust: trustListCheck(cred?.issuer),
-      notDenied: !denyListCheck(attributes),
-      policy: policyCheck(gate, attributes),
-      identity: identityCheck(attributes),
-    };
-    const allowed = Object.values(checks).every(Boolean);
-
-    results.set(
-      sessionId,
-      allowed
-        ? { status: "allowed", attributes, checks }
-        : { status: "denied", reason: "policy", checks }
-    );
-    console.log(`[${gate}] ${allowed ? "ALLOW" : "DENY"} session=${sessionId}`, checks);
+    // Paradym has already verified signature + revocation status (isValid).
+    if (!(cred?.isValid ?? false)) {
+      results.set(sessionId, { status: "denied", reason: "not-verified" });
+      console.log(`[${gate}] DENY (not-verified) session=${sessionId}`);
+    } else {
+      // Delegate the policy decision to the engine (async; updates results when done).
+      decideViaEngine(gate, attributes)
+        .then((outcome) => {
+          results.set(sessionId, outcome);
+          const detail =
+            outcome.status === "allowed" ? outcome.determiningPolicies
+            : outcome.status === "denied" ? outcome.reason
+            : "";
+          console.log(`[${gate}] ${outcome.status.toUpperCase()} session=${sessionId}`, detail ?? "");
+        })
+        .catch((err) => {
+          results.set(sessionId, { status: "denied", reason: `decision-error: ${err.message}` });
+          console.log(`[${gate}] DENY (decision-error) session=${sessionId}: ${err.message}`);
+        });
+    }
   }
 
   if (sessionId && eventType === "openid4vc.verification.failed") {
@@ -125,7 +132,7 @@ app.get("/result/:id", (req: Request, res: Response) => {
     if (Date.now() - entry.startedAt > DENY_TIMEOUT_MS) {
       const denied = { status: "denied" as const, reason: "no-presentation" };
       results.set(id, denied);
-            res.json(denied);
+      res.json(denied);
       return;
     }
     res.json({ status: "pending" });

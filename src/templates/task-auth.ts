@@ -16,7 +16,7 @@ export const taskAuthTemplateDefinition = {
   type: "StormcatchTaskAuthorization",
   revocable: true,
   validFrom: new Date().toISOString().split("T")[0],
-  validUntil: { start: "validFrom", future: { days: 1 } },
+  validUntil: { start: "validFrom", future: { days: 30 } },
   background: { color: "#0f2a1a" },
   text: { color: "#ffffff" },
   attributes: {
