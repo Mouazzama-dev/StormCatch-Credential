@@ -17,11 +17,10 @@ const TRUSTED_TASKAUTH_ISSUER = "did:key:z6MkStormcatchIssue1";
 
 function baselineRobot(now: number): Record<string, unknown> {
   return {
-    hasRobotId: true,
     hasOperatorCredential: true,
+    manufacturerId: "did:key:z6MkAcmeRobotics001",
     operator: "external-fleet-nl",
     certifications: [],
-    manufacturerId: "did:key:z6MkAcmeRobotics001",
     certifier: "EU Robotics Authority",
     qualityPass: true,
     qualificationValidUntil: now + 315360000,
@@ -88,6 +87,8 @@ app.post("/decision", async (req: Request, res: Response) => {
   robot.taskAuthValidUntil = typeof validUntil === "number" ? validUntil : now + 3600;
   robot.taskAuthIssuer = TRUSTED_TASKAUTH_ISSUER;
 
+  console.log("[decision] in:", { pointId, action, scope, validUntil }, "-> scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
+
   const authorizeBody = {
     actionId: "passCheckpoint",
     robot,
@@ -115,6 +116,7 @@ app.post("/decision", async (req: Request, res: Response) => {
       siteLists?: { ok: boolean; errors: string };
       stages?: unknown;
     };
+    console.log("[decision] engine:", d.decision, "| determining:", d.determiningPolicies, "| stages:", JSON.stringify(d.stages));
     res.json({
       allowed: d.decision === "permit",
       decision: d.decision,
