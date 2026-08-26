@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "boot": "tsx src/boot.ts"
+    "boot": "tsx src/boot.ts",
+        "accept": "tsx src/accept.ts"
   },
   "dependencies": {
     "@credo-ts/core": "0.5.13",
