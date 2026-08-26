@@ -4,6 +4,7 @@ services:
     command: pnpm exec tsx src/services/facility/server.ts
     env_file: .env
     environment:
+      SERVICE_ROLE: facility
       FACILITY_PORT: 4001
     ports:
       - "4001:4001"
@@ -13,6 +14,30 @@ services:
     command: pnpm exec tsx src/services/gate/server.ts
     env_file: .env
     environment:
+      SERVICE_ROLE: gate
       GATE_PORT: 4002
+      DECISION_URL: http://decision:4003
     ports:
       - "4002:4002"
+    depends_on:
+      - decision
+
+  decision:
+    build: .
+    command: pnpm exec tsx src/services/decision/server.ts
+    env_file: .env
+    environment:
+      DECISION_PORT: 4003
+      ENGINE_URL: http://host.docker.internal:5174
+      ENGINE_TOKEN: stormcatch-demo-token-1234
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4003:4003"
+
+  robot:
+    build: ./robot-agent
+    environment:
+      ROBOT_PORT: 4004
+    ports:
+      - "4004:4004"

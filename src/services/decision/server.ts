@@ -13,6 +13,7 @@ import type { Request, Response } from "express";
 // did:web issuer is not in the pilot trust list -- screening it is a later phase).
 const PORT = Number(process.env.DECISION_PORT ?? 4003);
 const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:5174";
+const ENGINE_TOKEN = process.env.ENGINE_TOKEN;
 const TRUSTED_TASKAUTH_ISSUER = "did:key:z6MkStormcatchIssue1";
 
 function baselineRobot(now: number): Record<string, unknown> {
@@ -101,8 +102,11 @@ app.post("/decision", async (req: Request, res: Response) => {
 
   try {
     const r = await fetch(`${ENGINE_URL}/api/authorize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+            method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(ENGINE_TOKEN ? { Authorization: `Bearer ${ENGINE_TOKEN}` } : {}),
+      },
       body: JSON.stringify(authorizeBody),
     });
     if (!r.ok) {
