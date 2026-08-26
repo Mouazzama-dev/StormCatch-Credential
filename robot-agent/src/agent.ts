@@ -1,62 +1,86 @@
+import express from "express";
 import {
+  DidKey,
+  DidJwk,
+  Kms,
+  X509Module,
+  W3cCredentialRecord,
+  W3cV2CredentialRecord,
+  MdocRecord,
   Agent,
-  DidsModule,
-  KeyDidRegistrar,
-  KeyDidResolver,
-  JwkDidRegistrar,
-  JwkDidResolver,
-  WebDidResolver,
 } from "@credo-ts/core";
 import { agentDependencies } from "@credo-ts/node";
 import { AskarModule } from "@credo-ts/askar";
-import { ariesAskar } from "@hyperledger/aries-askar-nodejs";
-import { OpenId4VcHolderModule } from "@credo-ts/openid4vc";
-import { KeyType } from "@credo-ts/core";
+import { askar } from "@openwallet-foundation/askar-nodejs";
+import { OpenId4VcModule } from "@credo-ts/openid4vc";
 
-// The robot's headless holder agent: askar storage + a DID + the OpenID4VC
-// holder module (OID4VCI receive + OID4VP present). SD-JWT VC works out of the box.
 export async function setupAgent() {
+  const app = express();
   const agent = new Agent({
-    config: {
-      label: "robot-holder",
-      walletConfig: { id: "robot-holder", key: "insecure-demo-key" },
-    },
+    config: { label: "robot-holder" },
     dependencies: agentDependencies,
     modules: {
-      askar: new AskarModule({ ariesAskar }),
-      dids: new DidsModule({
-        registrars: [new KeyDidRegistrar(), new JwkDidRegistrar()],
-        resolvers: [new KeyDidResolver(), new JwkDidResolver(), new WebDidResolver()],
+      askar: new AskarModule({ askar, store: { id: "robot-holder", key: "insecure-demo-key" } }),
+      openid4vc: new OpenId4VcModule({ app }),
+      x509: new X509Module({
+        getTrustedCertificatesForVerification: (_ctx, { certificateChain }) => [certificateChain[0].toString("pem")],
       }),
-      openId4VcHolder: new OpenId4VcHolderModule(),
     },
   });
   await agent.initialize();
   return agent;
 }
 
-// Accept a Paradym credential offer (OID4VCI) and store the credential.
-// The credentialBindingResolver creates a holder key/DID to bind the credential to (cnf).
-export async function acceptOffer(
-  agent: Awaited<ReturnType<typeof setupAgent>>,
-  offerUri: string
-) {
-  const resolved = await agent.modules.openId4VcHolder.resolveCredentialOffer(offerUri);
-
-  const credentials = await agent.modules.openId4VcHolder.acceptCredentialOfferUsingPreAuthorizedCode(
-    resolved,
-    {
-      credentialBindingResolver: async ({ keyType, supportedDidMethods }) => {
-        const method = supportedDidMethods?.some((m) => m.includes("jwk")) ? "jwk" : "key";
-        const created = await agent.dids.create({
-          method,
-          options: { keyType: keyType ?? KeyType.P256 },
-        });
-        const vm = created.didState.didDocument?.verificationMethod?.[0];
-        return { method: "did", didUrl: vm!.id };
-      },
-    }
+export async function acceptOffer(agent, offerUri, txCode) {
+  const holder = agent.modules.openid4vc.holder;
+  const resolved = await holder.resolveCredentialOffer(offerUri);
+  const tokenResponse = await holder.requestToken({ resolvedCredentialOffer: resolved, txCode });
+  const credentialResponse = await holder.requestCredentials({
+    resolvedCredentialOffer: resolved,
+    credentialConfigurationIds: Object.keys(resolved.offeredCredentialConfigurations),
+    credentialBindingResolver: async ({ supportedDidMethods, supportsAllDidMethods, proofTypes }) => {
+      const key = await agent.kms.createKeyForSignatureAlgorithm({
+        algorithm: proofTypes.jwt?.supportedSignatureAlgorithms[0] ?? "EdDSA",
+      });
+      const publicJwk = Kms.PublicJwk.fromPublicJwk(key.publicJwk);
+      if (supportsAllDidMethods || supportedDidMethods?.includes("did:key")) {
+        await agent.dids.create({ method: "key", options: { keyId: key.keyId } });
+        const didKey = new DidKey(publicJwk);
+        return { method: "did", didUrls: [`${didKey.did}#${didKey.publicJwk.fingerprint}`] };
+      }
+      if (supportedDidMethods?.includes("did:jwk")) {
+        const didJwk = DidJwk.fromPublicJwk(publicJwk);
+        await agent.dids.create({ method: "jwk", options: { keyId: key.keyId } });
+        return { method: "did", didUrls: [`${didJwk.did}#0`] };
+      }
+      return { method: "jwk", keys: [publicJwk] };
+    },
+    ...tokenResponse,
+  });
+  const stored = await Promise.all(
+    credentialResponse.credentials.map((c) => {
+      if (c.record instanceof W3cCredentialRecord) return agent.w3cCredentials.store({ record: c.record });
+      if (c.record instanceof W3cV2CredentialRecord) return agent.w3cV2Credentials.store({ record: c.record });
+      if (c.record instanceof MdocRecord) return agent.mdoc.store({ record: c.record });
+      return agent.sdJwtVc.store({ record: c.record });
+    })
   );
+  return stored;
+}
 
-  return credentials;
+export async function presentCredential(agent, requestUri) {
+  const holder = agent.modules.openid4vc.holder;
+  const resolved = await holder.resolveOpenId4VpAuthorizationRequest(requestUri);
+  if (!resolved.presentationExchange && !resolved.dcql) {
+    throw new Error("Request has neither DCQL nor Presentation Exchange");
+  }
+  return await holder.acceptOpenId4VpAuthorizationRequest({
+    authorizationRequestPayload: resolved.authorizationRequestPayload,
+    dcql: resolved.dcql
+      ? { credentials: holder.selectCredentialsForDcqlRequest(resolved.dcql.queryResult) }
+      : undefined,
+    presentationExchange: resolved.presentationExchange
+      ? { credentials: holder.selectCredentialsForPresentationExchangeRequest(resolved.presentationExchange.credentialsForRequest) }
+      : undefined,
+  });
 }

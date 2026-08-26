@@ -1,20 +1,22 @@
 {
   "name": "robot-agent",
-  "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node node_modules/@openwallet-foundation/askar-nodejs/scripts/install.js && node patch-askar.mjs",
     "boot": "tsx src/boot.ts",
-        "accept": "tsx src/accept.ts"
+    "accept": "tsx src/accept.ts",
+    "present": "tsx src/present.ts"
   },
   "dependencies": {
-    "@credo-ts/core": "0.5.13",
-    "@credo-ts/node": "0.5.13",
-    "@credo-ts/askar": "0.5.13",
-    "@credo-ts/openid4vc": "0.5.13",
-    "@hyperledger/aries-askar-nodejs": "^0.2.3"
+    "@credo-ts/core": "0.7.0",
+    "@credo-ts/node": "0.7.0",
+    "@credo-ts/askar": "0.7.0",
+    "@credo-ts/openid4vc": "0.7.0",
+    "@openwallet-foundation/askar-nodejs": "0.6.0",
+    "express": "^4.21.2"
   },
   "devDependencies": {
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "tsx": "^4.19.2"
   }
+  
 }

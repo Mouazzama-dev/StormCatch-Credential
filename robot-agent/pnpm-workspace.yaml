@@ -1,9 +1,15 @@
 # robot-agent is its own workspace, independent of the parent repo
 
 allowBuilds:
-  '@2060.io/ffi-napi': true
-  '@2060.io/ref-napi': true
-  '@hyperledger/aries-askar-nodejs': true
-  '@sphereon/pex': false
-  es5-ext: false
-  esbuild: true
+  '@openwallet-foundation/askar-nodejs': set this to true or false
+  cbor-extract: set this to true or false
+  esbuild: set this to true or false
+  koffi: set this to true or false
+
+onlyBuiltDependencies:
+  - '@openwallet-foundation/askar-nodejs'
+  - cbor-extract
+  - esbuild
+  - koffi
+
+verifyDepsBeforeRun: false
