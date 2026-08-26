@@ -22,7 +22,8 @@
     "task-setup": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/task-setup.ts",
     "trust-setup": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/trust-setup.ts",
     "register-webhook": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/register-webhook.ts",
-    "did": "SERVICE_ROLE=facility tsx --env-file=.env src/scripts/01-did.ts"
+    "did": "SERVICE_ROLE=facility tsx --env-file=.env src/scripts/01-did.ts",
+    "gate-demo-headless": "tsx --env-file=.env src/scripts/gate-demo-headless.ts"
   },
   "keywords": [],
   "author": "",

@@ -5,7 +5,8 @@
     "postinstall": "node node_modules/@openwallet-foundation/askar-nodejs/scripts/install.js && node patch-askar.mjs",
     "boot": "tsx src/boot.ts",
     "accept": "tsx src/accept.ts",
-    "present": "tsx src/present.ts"
+    "present": "tsx src/present.ts",
+    "robot": "tsx src/robot-service.ts"
   },
   "dependencies": {
     "@credo-ts/core": "0.7.0",
