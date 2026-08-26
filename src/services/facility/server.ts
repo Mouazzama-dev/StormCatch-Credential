@@ -3,6 +3,8 @@ import type { Request, Response } from "express";
 import { issueTaskAuth } from "../../credentials/task-auth-flow.ts";
 import { revokeCredentials } from "../../credentials/revoke.ts";
 import { paradymFetch, walletPath } from "../../client.ts";
+import { mountDocs } from "../_docs.ts";
+import { facilityOpenapi } from "./openapi.ts";
 
 // facility-service: the facility side of the lifecycle — issues and revokes
 // TaskAuthorization credentials. No webhook: issuance progress is polled.
@@ -65,7 +67,7 @@ app.post("/revoke", async (req: Request, res: Response) => {
     res.status(502).json({ error: (err as Error).message });
   }
 });
-
+mountDocs(app, facilityOpenapi);
 app.listen(PORT, () => {
   console.log(`facility-service listening on http://localhost:${PORT}`);
 });

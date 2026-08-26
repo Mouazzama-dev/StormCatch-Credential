@@ -1,5 +1,7 @@
 import express from "express";
 import type { Request, Response } from "express";
+import { mountDocs } from "../_docs.ts";
+import { decisionOpenapi } from "./openapi.ts";
 
 // decision-service: adapter between the gate and the policy engine's HTTP API
 // (@stormcatch/authoriser `pnpm api`, POST http://127.0.0.1:5174/api/authorize).
@@ -134,6 +136,7 @@ app.post("/decision", async (req: Request, res: Response) => {
   }
 });
 
+mountDocs(app, decisionOpenapi);
 app.listen(PORT, () =>
   console.log(`decision-service listening on http://localhost:${PORT} (engine at ${ENGINE_URL})`)
 );

@@ -23,7 +23,8 @@
     "trust-setup": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/trust-setup.ts",
     "register-webhook": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/register-webhook.ts",
     "did": "SERVICE_ROLE=facility tsx --env-file=.env src/scripts/01-did.ts",
-    "gate-demo-headless": "tsx --env-file=.env src/scripts/gate-demo-headless.ts"
+    "gate-demo-headless": "tsx --env-file=.env src/scripts/gate-demo-headless.ts",
+    "docs:check": "tsx src/scripts/check-openapi.ts"
   },
   "keywords": [],
   "author": "",
@@ -44,6 +45,7 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "swagger-ui-express": "^5.0.1"
   }
 }

@@ -1,5 +1,7 @@
 import express from "express";
 import { setupAgent, acceptOffer, presentCredential } from "./agent.ts";
+import { mountDocs } from "./docs.ts";
+import { robotOpenapi } from "./openapi.ts";
 
 const PORT = Number(process.env.ROBOT_PORT ?? 4004);
 
@@ -46,10 +48,10 @@ async function main() {
       res.status(500).json({ ok: false, error: (e as Error)?.message ?? String(e) });
     }
   });
+mountDocs(app, robotOpenapi);
 
   app.listen(PORT, () => console.log(`robot-service listening on http://localhost:${PORT}`));
 }
-
 main().catch((e) => {
   console.error("robot-service failed:", e);
   process.exit(1);

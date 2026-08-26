@@ -2,6 +2,8 @@ import express from "express";
 import type { Request, Response } from "express";
 import { paradymFetch, walletPath } from "../../client.ts";
 import { config } from "../../config.ts";
+import { mountDocs } from "../_docs.ts";
+import { gateOpenapi } from "./openapi.ts";
 
 // gate-service: the verifier (checkpoint). Creates a verification request, receives the
 // presentation via webhook, then delegates the allow/deny decision to the policy engine
@@ -140,7 +142,7 @@ app.get("/result/:id", (req: Request, res: Response) => {
   }
   res.json(entry);
 });
-
+mountDocs(app, gateOpenapi);
 app.listen(PORT, () => {
   console.log(`gate-service listening on http://localhost:${PORT}`);
 });

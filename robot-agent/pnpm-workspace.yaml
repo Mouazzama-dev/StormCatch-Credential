@@ -8,3 +8,10 @@ onlyBuiltDependencies:
   - cbor-extract
   - esbuild
   - koffi
+
+allowBuilds:
+  '@openwallet-foundation/askar-nodejs': set this to true or false
+  '@scarf/scarf': set this to true or false
+  cbor-extract: set this to true or false
+  esbuild: set this to true or false
+  koffi: set this to true or false
