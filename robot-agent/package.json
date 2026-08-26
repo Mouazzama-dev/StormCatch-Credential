@@ -1,0 +1,19 @@
+{
+  "name": "robot-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "boot": "tsx src/boot.ts"
+  },
+  "dependencies": {
+    "@credo-ts/core": "0.5.13",
+    "@credo-ts/node": "0.5.13",
+    "@credo-ts/askar": "0.5.13",
+    "@credo-ts/openid4vc": "0.5.13",
+    "@hyperledger/aries-askar-nodejs": "^0.2.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

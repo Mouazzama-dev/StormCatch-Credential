@@ -1,0 +1,9 @@
+# robot-agent is its own workspace, independent of the parent repo
+
+allowBuilds:
+  '@2060.io/ffi-napi': true
+  '@2060.io/ref-napi': true
+  '@hyperledger/aries-askar-nodejs': true
+  '@sphereon/pex': false
+  es5-ext: false
+  esbuild: true
