@@ -7,10 +7,13 @@ import type { Request, Response } from "express";
 // robot/task AuthorizeBody and forwards it. The engine runs its FULL pipeline:
 // Layer 1 + trust + deny + Cedar.
 //
-// PHASE A: identity/safety/manufacturer/issuer are the pilot's compliant defaults; only
-// the taskAuth action/scope/expiry come from the real presentation. taskAuthIssuer is
-// defaulted to the engine's anchored issuer so the trust stage passes (the real Paradym
-// did:web issuer is not in the pilot trust list -- screening it is a later phase).
+// PHASE B: identity/safety/manufacturer stay the pilot's compliant defaults; the taskAuth
+// action/scope/expiry come from the real presentation, and the presented issuer now travels
+// too when the gate has one. Paradym's session record is shallow (credentials[] carries no
+// issuer field, confirmed 2026-08-28), so the fallback below still fires on every live run
+// today; the engine side is ready either way, because the live Paradym did:web issuer is
+// anchored on the facility trust list (PARADYM_PILOT_ISSUER_DID, edition trust/2026-08-28.1)
+// for exactly (zoneAccess, sc:zone_access).
 const PORT = Number(process.env.DECISION_PORT ?? 4003);
 const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:5174";
 const TRUSTED_TASKAUTH_ISSUER = "did:key:z6MkStormcatchIssue1";
@@ -73,7 +76,7 @@ app.use(express.json());
 app.get("/health", (_req: Request, res: Response) => res.json({ service: "decision", ok: true }));
 
 app.post("/decision", async (req: Request, res: Response) => {
-  const { pointId, action, scope, validUntil } = req.body ?? {};
+  const { pointId, action, scope, validUntil, issuer } = req.body ?? {};
   if (!pointId) {
     res.status(400).json({ error: "pointId is required" });
     return;
@@ -85,9 +88,10 @@ app.post("/decision", async (req: Request, res: Response) => {
   robot.taskAuthActions = action ? [String(action)] : [];
   robot.taskAuthScopes = scope !== undefined && scope !== null ? [String(scope)] : [];
   robot.taskAuthValidUntil = typeof validUntil === "number" ? validUntil : now + 3600;
-  robot.taskAuthIssuer = TRUSTED_TASKAUTH_ISSUER;
+  const presentedIssuer = typeof issuer === "string" && issuer.length > 0 ? issuer : null;
+  robot.taskAuthIssuer = presentedIssuer ?? TRUSTED_TASKAUTH_ISSUER;
 
-  console.log("[decision] in:", { pointId, action, scope, validUntil }, "-> scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
+  console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
 
   const authorizeBody = {
     actionId: "passCheckpoint",

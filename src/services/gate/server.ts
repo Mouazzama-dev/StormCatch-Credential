@@ -7,6 +7,12 @@ import { config } from "../../config.ts";
 // presentation via webhook, then delegates the allow/deny decision to the policy engine
 // (through the decision-service). Paradym handles signature + revocation (isValid); the
 // engine handles policy (Layer 1 + trust + deny + Cedar).
+//
+// PHASE B: the presented issuer travels with the decision request whenever the webhook
+// carries one. Today Paradym's verification session record is shallow (credentials[] has
+// no issuer field, confirmed 2026-08-28), so the field is normally absent and the
+// decision-service falls back to its anchored default - the plumbing is here so that the
+// day the webhook enriches, the real issuer is screened with no code change.
 const PORT = Number(process.env.GATE_PORT ?? 4002);
 const DECISION_URL = process.env.DECISION_URL ?? "http://localhost:4003";
 
@@ -34,16 +40,20 @@ app.get("/health", (_req: Request, res: Response) => res.json({ service: "gate",
 // Ask the policy engine (via decision-service) whether this presentation passes the gate.
 async function decideViaEngine(
   gate: string,
-  attributes: Record<string, unknown>
+  attributes: Record<string, unknown>,
+  issuer?: string
 ): Promise<Outcome> {
   const res = await fetch(`${DECISION_URL}/decision`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    // JSON.stringify drops an undefined issuer, so an absent issuer stays absent on the
+    // wire rather than travelling as null or "".
     body: JSON.stringify({
       pointId: gate,
       action: attributes.action,
       scope: attributes.scope,
       validUntil: attributes.exp,
+      issuer,
     }),
   });
   if (!res.ok) throw new Error(`decision-service ${res.status}: ${await res.text()}`);
@@ -87,6 +97,10 @@ app.post("/webhook", (req: Request, res: Response) => {
   if (sessionId && eventType === "openid4vc.verification.data") {
     const cred = v?.credentials?.[0];
     const attributes = (cred?.presentedAttributes ?? {}) as Record<string, unknown>;
+    // The presented issuer, if the event carries one. The session record is shallow today
+    // (no credentials[].issuer), so this is normally undefined; the authoritative string
+    // lives in the SD-JWT iss, which this webhook never receives.
+    const issuer = typeof cred?.issuer === "string" && cred.issuer.length > 0 ? cred.issuer : undefined;
     const existing = results.get(sessionId);
     const gate = existing && "gate" in existing ? existing.gate : "G-1";
 
@@ -96,7 +110,7 @@ app.post("/webhook", (req: Request, res: Response) => {
       console.log(`[${gate}] DENY (not-verified) session=${sessionId}`);
     } else {
       // Delegate the policy decision to the engine (async; updates results when done).
-      decideViaEngine(gate, attributes)
+      decideViaEngine(gate, attributes, issuer)
         .then((outcome) => {
           results.set(sessionId, outcome);
           const detail =
