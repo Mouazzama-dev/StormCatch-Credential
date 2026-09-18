@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --import tsx --test test/*.test.ts",
     "template": "tsx --env-file=.env src/scripts/02-template.ts",
     "issue": "tsx --env-file=.env src/scripts/03-issue.ts",
     "verify": "tsx --env-file=.env src/scripts/04b-verify.ts",    
