@@ -76,11 +76,18 @@ app.use(express.json());
 app.get("/health", (_req: Request, res: Response) => res.json({ service: "decision", ok: true }));
 
 app.post("/decision", async (req: Request, res: Response) => {
-  const { pointId, action, scope, validUntil } = req.body ?? {};
+  const { pointId, session } = req.body ?? {};
   if (!pointId) {
     res.status(400).json({ error: "pointId is required" });
     return;
   }
+
+  // Prefer the real presented claims from the verification session; fall back to the
+  // legacy flat fields for older callers.
+  const presented = (session?.credentials?.[0]?.presentedAttributes ?? {}) as Record<string, unknown>;
+  const action = presented.action ?? req.body?.action;
+  const scope = presented.scope ?? req.body?.scope;
+  const validUntil = presented.exp ?? req.body?.validUntil;
 
   const now = Math.floor(Date.now() / 1000);
   const robot = baselineRobot(now);
@@ -88,6 +95,9 @@ app.post("/decision", async (req: Request, res: Response) => {
   robot.taskAuthActions = action ? [String(action)] : [];
   robot.taskAuthScopes = scope !== undefined && scope !== null ? [String(scope)] : [];
   robot.taskAuthValidUntil = typeof validUntil === "number" ? validUntil : now + 3600;
+  // Keep the anchored placeholder until the engine's real-issuer path (session) is live.
+  // Once Rocco confirms the did:web anchor + endpoint door, switch to:
+  //   robot.taskAuthIssuer = session?.credentials?.[0]?.issuer ?? TRUSTED_TASKAUTH_ISSUER;
   robot.taskAuthIssuer = TRUSTED_TASKAUTH_ISSUER;
 
   console.log("[decision] in:", { pointId, action, scope, validUntil }, "-> scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
@@ -100,6 +110,8 @@ app.post("/decision", async (req: Request, res: Response) => {
     enabledPolicies: [],
     disabledConditions: [],
     breakCredential: false,
+    // Verification session passed through verbatim for the engine's real trust check.
+    ...(session ? { session } : {}),
   };
 
   try {

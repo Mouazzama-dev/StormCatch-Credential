@@ -36,16 +36,19 @@ app.get("/health", (_req: Request, res: Response) => res.json({ service: "gate",
 // Ask the policy engine (via decision-service) whether this presentation passes the gate.
 async function decideViaEngine(
   gate: string,
-  attributes: Record<string, unknown>
+  verification: any
 ): Promise<Outcome> {
+  const attributes = (verification?.credentials?.[0]?.presentedAttributes ?? {}) as Record<string, unknown>;
   const res = await fetch(`${DECISION_URL}/decision`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       pointId: gate,
-      action: attributes.action,
-      scope: attributes.scope,
-      validUntil: attributes.exp,
+      // Forward the verification session verbatim: issuer + presentedAttributes + raw.
+      session: {
+        status: verification?.status ?? "verified",
+        credentials: verification?.credentials ?? [],
+      },
     }),
   });
   if (!res.ok) throw new Error(`decision-service ${res.status}: ${await res.text()}`);
@@ -98,7 +101,7 @@ app.post("/webhook", (req: Request, res: Response) => {
       console.log(`[${gate}] DENY (not-verified) session=${sessionId}`);
     } else {
       // Delegate the policy decision to the engine (async; updates results when done).
-      decideViaEngine(gate, attributes)
+      decideViaEngine(gate, v)
         .then((outcome) => {
           results.set(sessionId, outcome);
           const detail =
