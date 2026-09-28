@@ -7,6 +7,12 @@ import { config } from "../../config.ts";
 // presentation via webhook, then delegates the allow/deny decision to the policy engine
 // (through the decision-service). Paradym handles signature + revocation (isValid); the
 // engine handles policy (Layer 1 + trust + deny + Cedar).
+//
+// PHASE B: the presented issuer travels with the decision request. The
+// openid4vc.verification.data webhook carries it per credential (credentials[].issuer, and
+// iss inside presentedAttributes, read off a captured event on 2026-08-28); only the REST
+// session record is shallow. So on a live run the decision-service screens the real issuer,
+// and its anchored fallback fires only for a caller that sends none.
 const PORT = Number(process.env.GATE_PORT ?? 4002);
 const DECISION_URL = process.env.DECISION_URL ?? "http://localhost:4003";
 
@@ -34,16 +40,20 @@ app.get("/health", (_req: Request, res: Response) => res.json({ service: "gate",
 // Ask the policy engine (via decision-service) whether this presentation passes the gate.
 async function decideViaEngine(
   gate: string,
-  attributes: Record<string, unknown>
+  attributes: Record<string, unknown>,
+  issuer?: string
 ): Promise<Outcome> {
   const res = await fetch(`${DECISION_URL}/decision`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    // JSON.stringify drops an undefined issuer, so an absent issuer stays absent on the
+    // wire rather than travelling as null or "".
     body: JSON.stringify({
       pointId: gate,
       action: attributes.action,
       scope: attributes.scope,
       validUntil: attributes.exp,
+      issuer,
     }),
   });
   if (!res.ok) throw new Error(`decision-service ${res.status}: ${await res.text()}`);
@@ -87,6 +97,10 @@ app.post("/webhook", (req: Request, res: Response) => {
   if (sessionId && eventType === "openid4vc.verification.data") {
     const cred = v?.credentials?.[0];
     const attributes = (cred?.presentedAttributes ?? {}) as Record<string, unknown>;
+    // The presented issuer as Paradym reports it for this credential, the same string as the
+    // iss inside presentedAttributes on the captured event. A missing or empty value stays
+    // absent on the wire.
+    const issuer = typeof cred?.issuer === "string" && cred.issuer.length > 0 ? cred.issuer : undefined;
     const existing = results.get(sessionId);
     const gate = existing && "gate" in existing ? existing.gate : "G-1";
 
@@ -96,7 +110,7 @@ app.post("/webhook", (req: Request, res: Response) => {
       console.log(`[${gate}] DENY (not-verified) session=${sessionId}`);
     } else {
       // Delegate the policy decision to the engine (async; updates results when done).
-      decideViaEngine(gate, attributes)
+      decideViaEngine(gate, attributes, issuer)
         .then((outcome) => {
           results.set(sessionId, outcome);
           const detail =
