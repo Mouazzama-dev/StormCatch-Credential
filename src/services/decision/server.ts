@@ -8,16 +8,22 @@ import type { Request, Response } from "express";
 // Layer 1 + trust + deny + Cedar.
 //
 // PHASE B: identity/safety/manufacturer stay the pilot's compliant defaults; the taskAuth
-// action/scope/expiry come from the real presentation, and the presented issuer now travels
-// too when the gate has one. Paradym's session record is shallow (credentials[] carries no
-// issuer field, confirmed 2026-08-28), so the fallback below still fires on every live run
-// today; the engine side is ready either way, because both Paradym workspace issuers are
-// anchored on the facility trust list for the three pilot actions since 2026-09-20
-// (PARADYM_PILOT_ISSUER_DID and PARADYM_FACILITY_ISSUER_DID; zone access alone before that).
+// action/scope/expiry and the issuer come from the real presentation. They arrive either as
+// the verification session the gate forwards (the shape agreed on 2026-08-28: the webhook's
+// credential entries, issuer and presentedAttributes as Paradym sent them) or as flat fields.
+// The openid4vc.verification.data webhook carries the issuer; only the REST session record is
+// shallow. Both Paradym workspace issuers are anchored on the facility trust list for the
+// three pilot actions since 2026-09-20 (PARADYM_PILOT_ISSUER_DID and
+// PARADYM_FACILITY_ISSUER_DID; zone access alone before that), so the facility's live
+// credentials permit and any other issuer is denied at trust.
+//
+// The session itself is not passed on: the engine's /api/authorize reads no session field, so
+// the issuer is screened only because it is copied into taskAuthIssuer here.
 //
 // The fallback is the one-sided switch the engine's level-4 tests guard against: an absent
 // issuer resolves to an anchored one here, which the engine's own session adapter refuses to
-// do. It stays until the gate reads the issuer off the SD-JWT, and it is named as a gap.
+// do. It stays until a live run shows the issuer on every presentation, and it is named as a
+// gap.
 const PORT = Number(process.env.DECISION_PORT ?? 4003);
 const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:5174";
 const TRUSTED_TASKAUTH_ISSUER = "did:key:z6MkStormcatchIssue1";
@@ -84,11 +90,19 @@ app.use(express.json());
 app.get("/health", (_req: Request, res: Response) => res.json({ service: "decision", ok: true }));
 
 app.post("/decision", async (req: Request, res: Response) => {
-  const { pointId, action, scope, validUntil, issuer } = req.body ?? {};
+  const { pointId, session } = req.body ?? {};
   if (!pointId) {
     res.status(400).json({ error: "pointId is required" });
     return;
   }
+
+  // Prefer the presented claims from the forwarded session; fall back to the flat fields.
+  const credential = session?.credentials?.[0];
+  const presented = (credential?.presentedAttributes ?? {}) as Record<string, unknown>;
+  const action = presented.action ?? req.body?.action;
+  const scope = presented.scope ?? req.body?.scope;
+  const validUntil = presented.exp ?? req.body?.validUntil;
+  const issuer = credential?.issuer ?? req.body?.issuer;
 
   const now = Math.floor(Date.now() / 1000);
   const robot = baselineRobot(now);
