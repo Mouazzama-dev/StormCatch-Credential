@@ -119,6 +119,7 @@ The policy engine runs a second, independent trust check (Layer 1 plus a trust l
 ## Notes and gotchas
 
 - The gate service must run with `SERVICE_ROLE=gate` (the container sets it) or it defaults to the facility wallet.
+- Every service listens on all interfaces unless `FACILITY_HOST`, `GATE_HOST`, `DECISION_HOST` or `ROBOT_HOST` names one. None of them authenticates its caller, so on a shared machine set it to `127.0.0.1` and reach the service through an SSH tunnel.
 - The engine binds loopback by default and is unreachable from a container; run it with `HOST=0.0.0.0` and a `TESTER_TOKEN`, and the decision-service authenticates with that token over `host.docker.internal`.
 - ngrok must point at port 4002 and the webhook must be re-registered after every ngrok restart, or the gate never receives the verification result and the request times out as a deny.
 - Compose reads `.env` only when a container is created; after editing `.env` run `docker compose up -d --force-recreate <service>`.

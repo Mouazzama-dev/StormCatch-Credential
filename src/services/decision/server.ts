@@ -14,6 +14,9 @@ import { decisionOpenapi } from "./openapi.ts";
 // defaulted to the engine's anchored issuer so the trust stage passes (the real Paradym
 // did:web issuer is not in the pilot trust list -- screening it is a later phase).
 const PORT = Number(process.env.DECISION_PORT ?? 4003);
+// Unset, the service listens on every interface, which the containers need. On a shared box,
+// DECISION_HOST=127.0.0.1 keeps it off the network: the service has no authentication.
+const HOST = process.env.DECISION_HOST;
 const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:5174";
 const ENGINE_TOKEN = process.env.ENGINE_TOKEN;
 const TRUSTED_TASKAUTH_ISSUER = "did:key:z6MkStormcatchIssue1";
@@ -149,6 +152,6 @@ app.post("/decision", async (req: Request, res: Response) => {
 });
 
 mountDocs(app, decisionOpenapi);
-app.listen(PORT, () =>
+app.listen({ port: PORT, host: HOST }, () =>
   console.log(`decision-service listening on http://localhost:${PORT} (engine at ${ENGINE_URL})`)
 );

@@ -9,6 +9,9 @@ import { facilityOpenapi } from "./openapi.ts";
 // facility-service: the facility side of the lifecycle — issues and revokes
 // TaskAuthorization credentials. No webhook: issuance progress is polled.
 const PORT = Number(process.env.FACILITY_PORT ?? 4001);
+// Unset, the service listens on every interface, which the containers need. On a shared box,
+// FACILITY_HOST=127.0.0.1 keeps it off the network: the service has no authentication.
+const HOST = process.env.FACILITY_HOST;
 
 const app = express();
 app.use(express.json());
@@ -68,6 +71,6 @@ app.post("/revoke", async (req: Request, res: Response) => {
   }
 });
 mountDocs(app, facilityOpenapi);
-app.listen(PORT, () => {
+app.listen({ port: PORT, host: HOST }, () => {
   console.log(`facility-service listening on http://localhost:${PORT}`);
 });

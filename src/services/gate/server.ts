@@ -10,6 +10,9 @@ import { gateOpenapi } from "./openapi.ts";
 // (through the decision-service). Paradym handles signature + revocation (isValid); the
 // engine handles policy (Layer 1 + trust + deny + Cedar).
 const PORT = Number(process.env.GATE_PORT ?? 4002);
+// Unset, the service listens on every interface, which the containers need. On a shared box,
+// GATE_HOST=127.0.0.1 keeps it off the network: the service has no authentication.
+const HOST = process.env.GATE_HOST;
 const DECISION_URL = process.env.DECISION_URL ?? "http://localhost:4003";
 
 // Which presentation template each gate uses (ids from .env via config).
@@ -146,6 +149,6 @@ app.get("/result/:id", (req: Request, res: Response) => {
   res.json(entry);
 });
 mountDocs(app, gateOpenapi);
-app.listen(PORT, () => {
+app.listen({ port: PORT, host: HOST }, () => {
   console.log(`gate-service listening on http://localhost:${PORT}`);
 });

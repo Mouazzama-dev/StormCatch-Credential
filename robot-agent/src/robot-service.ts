@@ -4,6 +4,9 @@ import { mountDocs } from "./docs.ts";
 import { robotOpenapi } from "./openapi.ts";
 
 const PORT = Number(process.env.ROBOT_PORT ?? 4004);
+// Unset, the service listens on every interface, which the containers need. On a shared box,
+// ROBOT_HOST=127.0.0.1 keeps it off the network: the service has no authentication.
+const HOST = process.env.ROBOT_HOST;
 
 async function main() {
   const agent = await setupAgent();
@@ -50,7 +53,7 @@ async function main() {
   });
 mountDocs(app, robotOpenapi);
 
-  app.listen(PORT, () => console.log(`robot-service listening on http://localhost:${PORT}`));
+  app.listen({ port: PORT, host: HOST }, () => console.log(`robot-service listening on http://localhost:${PORT}`));
 }
 main().catch((e) => {
   console.error("robot-service failed:", e);
