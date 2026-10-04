@@ -15,8 +15,9 @@ export const taskAuthTemplateDefinition = {
   issuer: "did:web",
   type: "StormcatchTaskAuthorization",
   revocable: true,
-  validFrom: new Date().toISOString().split("T")[0],
-  validUntil: { start: "validFrom", future: { days: 30 } },
+  // Counted from each issuance. A validFrom date is fixed when the template is created, so
+  // every credential issued 30 days after that arrived already expired.
+  validUntil: { start: "issuance", future: { days: 30 } },
   background: { color: "#0f2a1a" },
   text: { color: "#ffffff" },
   attributes: {
