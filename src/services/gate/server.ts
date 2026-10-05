@@ -9,6 +9,12 @@ import { gateOpenapi } from "./openapi.ts";
 // presentation via webhook, then delegates the allow/deny decision to the policy engine
 // (through the decision-service). Paradym handles signature + revocation (isValid); the
 // engine handles policy (Layer 1 + trust + deny + Cedar).
+//
+// PHASE B: the presented issuer travels with the decision request. The
+// openid4vc.verification.data webhook carries it per credential (credentials[].issuer, and
+// iss inside presentedAttributes, read off a captured event on 2026-08-28); only the REST
+// session record is shallow. So on a live run the decision-service screens the real issuer,
+// and its anchored fallback fires only for a caller that sends none.
 const PORT = Number(process.env.GATE_PORT ?? 4002);
 // Unset, the service listens on every interface, which the containers need. On a shared box,
 // GATE_HOST=127.0.0.1 keeps it off the network: the service has no authentication.
@@ -41,17 +47,29 @@ async function decideViaEngine(
   gate: string,
   verification: any
 ): Promise<Outcome> {
-  const attributes = (verification?.credentials?.[0]?.presentedAttributes ?? {}) as Record<string, unknown>;
+  const cred = verification?.credentials?.[0];
+  const attributes = (cred?.presentedAttributes ?? {}) as Record<string, unknown>;
+  // The presented issuer: Paradym's per-credential issuer when present, else the iss claim.
+  // A missing or empty value stays absent on the wire.
+  const issuerRaw = typeof cred?.issuer === "string" && cred.issuer.length > 0 ? cred.issuer : attributes.iss;
+  const issuer = typeof issuerRaw === "string" && issuerRaw.length > 0 ? issuerRaw : undefined;
   const res = await fetch(`${DECISION_URL}/decision`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    // JSON.stringify drops an undefined issuer, so an absent issuer stays absent on the
+    // wire rather than travelling as null or "".
     body: JSON.stringify({
       pointId: gate,
-      // Forward the verification session verbatim: issuer + presentedAttributes + raw.
+      // Forward the verification session verbatim (issuer + presentedAttributes + raw) and
+      // the flat fields, so both decision-service contracts are served.
       session: {
         status: verification?.status ?? "verified",
         credentials: verification?.credentials ?? [],
       },
+      action: attributes.action,
+      scope: attributes.scope,
+      validUntil: attributes.exp,
+      issuer,
     }),
   });
   if (!res.ok) throw new Error(`decision-service ${res.status}: ${await res.text()}`);
@@ -85,6 +103,33 @@ app.post("/verify", async (req: Request, res: Response) => {
   }
 });
 
+// Judge one verified session: Paradym has already checked signature + revocation
+// (isValid); the policy decision is delegated to the engine (async; results updated when done).
+function judgeVerification(sessionId: string, verification: any): void {
+  const cred = verification?.credentials?.[0];
+  const existing = results.get(sessionId);
+  const gate = existing && "gate" in existing ? existing.gate : "G-1";
+
+  if (!(cred?.isValid ?? false)) {
+    results.set(sessionId, { status: "denied", reason: "not-verified" });
+    console.log(`[${gate}] DENY (not-verified) session=${sessionId}`);
+    return;
+  }
+  decideViaEngine(gate, verification)
+    .then((outcome) => {
+      results.set(sessionId, outcome);
+      const detail =
+        outcome.status === "allowed" ? outcome.determiningPolicies
+        : outcome.status === "denied" ? outcome.reason
+        : "";
+      console.log(`[${gate}] ${outcome.status.toUpperCase()} session=${sessionId}`, detail ?? "");
+    })
+    .catch((err) => {
+      results.set(sessionId, { status: "denied", reason: `decision-error: ${err.message}` });
+      console.log(`[${gate}] DENY (decision-error) session=${sessionId}: ${err.message}`);
+    });
+}
+
 // Paradym posts verification events here (register this URL via ngrok -> gate port).
 app.post("/webhook", (req: Request, res: Response) => {
   const body = req.body;
@@ -92,32 +137,18 @@ app.post("/webhook", (req: Request, res: Response) => {
   const v = body?.payload?.openId4VcVerification;
   const sessionId = v?.id ?? body?.payload?.openId4VcVerificationId;
 
+  // Two event shapes: "verification.data" carries the credentials inline (older Paradym
+  // behaviour); "verification.verified" carries only the session id and the record has to
+  // be fetched. Both end in the same judgement.
   if (sessionId && eventType === "openid4vc.verification.data") {
-    const cred = v?.credentials?.[0];
-    const attributes = (cred?.presentedAttributes ?? {}) as Record<string, unknown>;
-    const existing = results.get(sessionId);
-    const gate = existing && "gate" in existing ? existing.gate : "G-1";
-
-    // Paradym has already verified signature + revocation status (isValid).
-    if (!(cred?.isValid ?? false)) {
-      results.set(sessionId, { status: "denied", reason: "not-verified" });
-      console.log(`[${gate}] DENY (not-verified) session=${sessionId}`);
-    } else {
-      // Delegate the policy decision to the engine (async; updates results when done).
-      decideViaEngine(gate, v)
-        .then((outcome) => {
-          results.set(sessionId, outcome);
-          const detail =
-            outcome.status === "allowed" ? outcome.determiningPolicies
-            : outcome.status === "denied" ? outcome.reason
-            : "";
-          console.log(`[${gate}] ${outcome.status.toUpperCase()} session=${sessionId}`, detail ?? "");
-        })
-        .catch((err) => {
-          results.set(sessionId, { status: "denied", reason: `decision-error: ${err.message}` });
-          console.log(`[${gate}] DENY (decision-error) session=${sessionId}: ${err.message}`);
-        });
-    }
+    judgeVerification(sessionId, v);
+  } else if (sessionId && eventType === "openid4vc.verification.verified") {
+    paradymFetch<any>(walletPath(`/openid4vc/verification/${sessionId}`))
+      .then((record) => judgeVerification(sessionId, record))
+      .catch((err) => {
+        results.set(sessionId, { status: "denied", reason: `session-fetch-error: ${err.message}` });
+        console.log(`DENY (session-fetch-error) session=${sessionId}: ${err.message}`);
+      });
   }
 
   if (sessionId && eventType === "openid4vc.verification.failed") {

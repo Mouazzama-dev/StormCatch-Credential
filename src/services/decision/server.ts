@@ -9,10 +9,23 @@ import { decisionOpenapi } from "./openapi.ts";
 // robot/task AuthorizeBody and forwards it. The engine runs its FULL pipeline:
 // Layer 1 + trust + deny + Cedar.
 //
-// PHASE A: identity/safety/manufacturer/issuer are the pilot's compliant defaults; only
-// the taskAuth action/scope/expiry come from the real presentation. taskAuthIssuer is
-// defaulted to the engine's anchored issuer so the trust stage passes (the real Paradym
-// did:web issuer is not in the pilot trust list -- screening it is a later phase).
+// PHASE B: identity/safety/manufacturer stay the pilot's compliant defaults; the taskAuth
+// action/scope/expiry and the issuer come from the real presentation. They arrive either as
+// the verification session the gate forwards (the shape agreed on 2026-08-28: the webhook's
+// credential entries, issuer and presentedAttributes as Paradym sent them) or as flat fields.
+// The openid4vc.verification.data webhook carries the issuer; only the REST session record is
+// shallow. Both Paradym workspace issuers are anchored on the facility trust list for the
+// three pilot actions since 2026-09-20 (PARADYM_PILOT_ISSUER_DID and
+// PARADYM_FACILITY_ISSUER_DID; zone access alone before that), so the facility's live
+// credentials permit and any other issuer is denied at trust.
+//
+// The session itself is not passed on: the engine's /api/authorize reads no session field, so
+// the issuer is screened only because it is copied into taskAuthIssuer here.
+//
+// The fallback is the one-sided switch the engine's level-4 tests guard against: an absent
+// issuer resolves to an anchored one here, which the engine's own session adapter refuses to
+// do. It stays until a live run shows the issuer on every presentation, and it is named as a
+// gap.
 const PORT = Number(process.env.DECISION_PORT ?? 4003);
 // Unset, the service listens on every interface, which the containers need. On a shared box,
 // DECISION_HOST=127.0.0.1 keeps it off the network: the service has no authentication.
@@ -27,7 +40,11 @@ function baselineRobot(now: number): Record<string, unknown> {
     manufacturerId: "did:key:z6MkAcmeRobotics001",
     operator: "external-fleet-nl",
     certifications: [],
-    certifier: "EU Robotics Authority",
+    // The certifying body's DID, not its name: the engine's trust stage screens the safety
+    // certification's certifier since 2026-09-20 and refuses any form that is not a DID. This
+    // value is ACCEPTED_CERTIFIER in the engine's pilot vocabulary, anchored on the facility
+    // trust list for (safetyCert, sc:safety).
+    certifier: "did:key:z6MkEuRoboticsAuth01",
     qualityPass: true,
     qualificationValidUntil: now + 315360000,
     accessPassZones: ["meibergdreef-9"],
@@ -61,7 +78,7 @@ function baselineTask(pointId: string, now: number): Record<string, unknown> {
     createdAt: now - 600,
     deadline: now + 3600,
     trustedManufacturers: ["did:key:z6MkAcmeRobotics001"],
-    acceptedCertifiers: ["EU Robotics Authority"],
+    acceptedCertifiers: ["did:key:z6MkEuRoboticsAuth01"],
     requiredClearance: 0,
     requiredCertifications: [],
     hazardClass: "",
@@ -85,12 +102,13 @@ app.post("/decision", async (req: Request, res: Response) => {
     return;
   }
 
-  // Prefer the real presented claims from the verification session; fall back to the
-  // legacy flat fields for older callers.
-  const presented = (session?.credentials?.[0]?.presentedAttributes ?? {}) as Record<string, unknown>;
+  // Prefer the presented claims from the forwarded session; fall back to the flat fields.
+  const credential = session?.credentials?.[0];
+  const presented = (credential?.presentedAttributes ?? {}) as Record<string, unknown>;
   const action = presented.action ?? req.body?.action;
   const scope = presented.scope ?? req.body?.scope;
   const validUntil = presented.exp ?? req.body?.validUntil;
+  const issuer = credential?.issuer ?? presented.iss ?? req.body?.issuer;
 
   const now = Math.floor(Date.now() / 1000);
   const robot = baselineRobot(now);
@@ -98,12 +116,10 @@ app.post("/decision", async (req: Request, res: Response) => {
   robot.taskAuthActions = action ? [String(action)] : [];
   robot.taskAuthScopes = scope !== undefined && scope !== null ? [String(scope)] : [];
   robot.taskAuthValidUntil = typeof validUntil === "number" ? validUntil : now + 3600;
-  // Keep the anchored placeholder until the engine's real-issuer path (session) is live.
-  // Once Rocco confirms the did:web anchor + endpoint door, switch to:
-  //   robot.taskAuthIssuer = session?.credentials?.[0]?.issuer ?? TRUSTED_TASKAUTH_ISSUER;
-  robot.taskAuthIssuer = TRUSTED_TASKAUTH_ISSUER;
+  const presentedIssuer = typeof issuer === "string" && issuer.length > 0 ? issuer : null;
+  robot.taskAuthIssuer = presentedIssuer ?? TRUSTED_TASKAUTH_ISSUER;
 
-  console.log("[decision] in:", { pointId, action, scope, validUntil }, "-> scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
+  console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
 
   const authorizeBody = {
     actionId: "passCheckpoint",
