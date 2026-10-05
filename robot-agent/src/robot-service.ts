@@ -46,7 +46,12 @@ async function main() {
       const { requestUri } = req.body ?? {};
       if (!requestUri) return res.status(400).json({ ok: false, error: "requestUri required" });
       const result = await presentCredential(agent, requestUri);
-      res.json({ ok: result?.ok ?? true, serverStatus: result?.serverResponse?.status });
+      const serverStatus = result?.serverResponse?.status;
+      // Surface the verifier's error body: a 4xx from response_uri is the only
+      // signal we get when the presentation is rejected (DCQL mismatch, expired
+      // request, wrong credential), and the status alone says nothing.
+      const serverBody = result?.serverResponse?.body;
+      res.json({ ok: result?.ok ?? true, serverStatus, ...(serverStatus && serverStatus >= 400 ? { serverBody } : {}) });
     } catch (e) {
       res.status(500).json({ ok: false, error: (e as Error)?.message ?? String(e) });
     }
