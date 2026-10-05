@@ -1,0 +1,10 @@
+import { writeFileSync } from "node:fs";
+import { paradymFetch, walletPath } from "../client.ts";
+const id = process.env.PARADYM_TASKAUTH_TEMPLATE_ID;
+if (!id) throw new Error("PARADYM_TASKAUTH_TEMPLATE_ID not set");
+const t = await paradymFetch<Record<string, unknown>>(walletPath(`/templates/credentials/sd-jwt-vc/${id}`));
+writeFileSync(process.argv[2], JSON.stringify(t, null, 2), { mode: 0o600 });
+console.log("keys:", Object.keys(t).join(", "));
+console.log("name:", t.name, "| type:", t.type, "| revocable:", t.revocable, "| archived:", t.archivedAt ?? t.archived ?? "-");
+console.log("validFrom:", JSON.stringify(t.validFrom), "| validUntil:", JSON.stringify(t.validUntil));
+console.log("createdAt:", t.createdAt, "| updatedAt:", t.updatedAt);
