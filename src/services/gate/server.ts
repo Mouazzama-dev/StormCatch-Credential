@@ -27,11 +27,14 @@ const GATE_TEMPLATES: Record<string, string> = {
   "G-2": config.gate2TemplateId,
 };
 
-// If no presentation arrives within this window, treat it as DENY.
+// If no presentation arrives within this window, treat it as DENY. The window
+// is armed by the first poll from the robot (it polls right after presenting),
+// not by the session creation: the gate display creates sessions ahead of time
+// and a code can sit on the panel for minutes before a robot reads it.
 const DENY_TIMEOUT_MS = 45_000;
 
 type Outcome =
-  | { status: "pending"; startedAt: number; gate: string }
+  | { status: "pending"; startedAt: number; gate: string; polledAt?: number }
   | { status: "allowed"; attributes: Record<string, unknown>; determiningPolicies?: string[] }
   | { status: "denied"; reason: string; determiningPolicies?: string[] };
 
@@ -160,6 +163,7 @@ app.post("/webhook", (req: Request, res: Response) => {
 });
 
 // Poll the outcome. Applies the no-presentation-timeout = DENY rule.
+// `?observer=1` (the gate display) reads without arming the timeout.
 app.get("/result/:id", (req: Request, res: Response) => {
   const id = String(req.params.id);
   const entry = results.get(id);
@@ -168,7 +172,11 @@ app.get("/result/:id", (req: Request, res: Response) => {
     return;
   }
   if (entry.status === "pending") {
-    if (Date.now() - entry.startedAt > DENY_TIMEOUT_MS) {
+    const observer = req.query.observer === "1";
+    if (!observer && entry.polledAt === undefined) {
+      entry.polledAt = Date.now();
+    }
+    if (entry.polledAt !== undefined && Date.now() - entry.polledAt > DENY_TIMEOUT_MS) {
       const denied = { status: "denied" as const, reason: "no-presentation" };
       results.set(id, denied);
       res.json(denied);
