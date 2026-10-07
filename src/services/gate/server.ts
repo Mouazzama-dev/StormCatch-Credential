@@ -229,6 +229,15 @@ function handleWebhook(req: Request, res: Response): void {
   const sessionId = v?.id ?? body?.payload?.openId4VcVerificationId;
   console.log(`[webhook] ${eventType} session=${sessionId ?? "?"} creds=${v?.credentials?.length ?? "-"} issuer=${v?.credentials?.[0]?.issuer ?? v?.credentials?.[0]?.issuerId ?? "-"}`);
 
+  // Only sessions this gate created are judged. The wallet is shared with other receivers,
+  // so events for foreign sessions arrive here too; a forged ALLOW for an unknown id must
+  // never become a verdict someone can later poll.
+  if (sessionId && !sessions.has(sessionId)) {
+    console.log(`[webhook] ignored, session not ours session=${sessionId}`);
+    res.status(200).json({ received: true });
+    return;
+  }
+
   if (sessionId && eventType === "openid4vc.verification.data") {
     judgeVerification(sessionId, v, "data");
   } else if (sessionId && eventType === "openid4vc.verification.verified" && !judgedFrom.has(sessionId)) {
@@ -244,7 +253,9 @@ function handleWebhook(req: Request, res: Response): void {
         })
         .catch((err) => {
           if (judgedFrom.has(sessionId)) return;
-          results.set(sessionId, { status: "denied", reason: `session-fetch-error: ${err.message}` });
+          // Judged from a failed record read: the full data event may still replace it.
+          judgedFrom.set(sessionId, "record");
+          results.set(sessionId, { status: "denied", reason: "session-fetch-error" });
           console.log(`DENY (session-fetch-error) session=${sessionId}: ${err.message}`);
         });
     }, VERIFIED_GRACE_MS).unref();
@@ -259,11 +270,9 @@ function handleWebhook(req: Request, res: Response): void {
   res.status(200).json({ received: true });
 }
 
+// One webhook path only. With a token set the bare /webhook is gone as well: the LAN is
+// not trusted more than the tunnel, and the pilot test suite posts to the tokenised path.
 app.post(WEBHOOK_PATH, handleWebhook);
-if (WEBHOOK_TOKEN) {
-  // The bare path stays for LAN tests; the tunnel guard above keeps it off the tunnel.
-  app.post("/webhook", handleWebhook);
-}
 
 // Poll the outcome. Applies the no-presentation-timeout = DENY rule.
 // `?observer=1` (the gate display) reads without arming the timeout.

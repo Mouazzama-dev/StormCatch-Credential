@@ -9,7 +9,9 @@ Edit here, copy over, restart the unit.
 | janus | `sc-dev-cm5-janus` | gate | engine :5175, decision :4003, gate :4002, Cloudflare quick tunnel + Paradym webhook, e-paper loop |
 | bishop | `sc-dev-pi5-bishop` | robot | robot-service :4004, camera MJPEG :8000, dashboard :8090, QR reader |
 
-All services bind to loopback except the gate, which bishop reaches over the LAN.
+All services bind to loopback except the gate, which bishop reaches over the LAN, and the
+gate webhook, which Paradym reaches through the tunnel on `/webhook/<token>` only.
+`ROBOT_HOST` and `CAM_BIND` open robot-service and the camera stream when a remote consumer needs them.
 
 ## Install on a box
 

@@ -5,7 +5,7 @@
   /snapshot.jpg  the latest frame only, returned at once (reader, dashboard):
                  no buffering, so a slow consumer never falls behind the camera
 """
-import io, logging, socketserver
+import io, logging, os, socketserver
 from http import server
 from threading import Condition
 from picamera2 import Picamera2
@@ -73,6 +73,7 @@ picam2.configure(picam2.create_video_configuration(main={"size": (1280, 720)}, b
 output = StreamingOutput()
 picam2.start_recording(MJPEGEncoder(), FileOutput(output))
 try:
-    StreamingServer(("0.0.0.0", 8000), Handler).serve_forever()
+    # Loopback by default: the reader and the dashboard proxy are on this box. CAM_BIND=0.0.0.0 opens it.
+    StreamingServer((os.environ.get("CAM_BIND", "127.0.0.1"), 8000), Handler).serve_forever()
 finally:
     picam2.stop_recording()

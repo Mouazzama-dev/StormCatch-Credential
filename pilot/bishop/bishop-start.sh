@@ -22,7 +22,8 @@ esac
 
 stop_all
 rotate_logs
-( cd "$CC" && setsid nohup ./node_modules/.bin/tsx src/robot-service.ts > "$LOGS/robot-service.log" 2>&1 < /dev/null & )
+# Loopback only: robot-service has no auth and every caller (qr_present, dashboard) is local.
+( cd "$CC" && ROBOT_HOST=127.0.0.1 setsid nohup ./node_modules/.bin/tsx src/robot-service.ts > "$LOGS/robot-service.log" 2>&1 < /dev/null & )
 cd "$HOME"
 setsid nohup python3 "$HOME/cam_stream.py" >> "$LOGS/cam_stream.log" 2>&1 < /dev/null &
 sleep 5
