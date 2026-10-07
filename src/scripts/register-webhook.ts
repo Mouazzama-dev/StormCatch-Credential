@@ -1,5 +1,7 @@
 import { listWebhooks, registerWebhook, deleteWebhook } from "../webhook/register.ts";
 
+const WEBHOOK_NAME = "Stormcatch verification receiver";
+
 async function main() {
   const publicUrl = process.argv[2];
   if (!publicUrl) {
@@ -12,16 +14,22 @@ async function main() {
 
   console.log("Registering webhook\n");
 
-  // Clean up any previously registered webhooks (stale ngrok URLs)
+  // Remove only the receivers this script created (stale quick-tunnel URLs). The gate
+  // wallet is shared with the account owner, whose other webhooks must stay.
   const existing = await listWebhooks();
   for (const wh of existing) {
+    const ours = wh.name === WEBHOOK_NAME || /\.trycloudflare\.com\//.test(wh.url);
+    if (!ours) {
+      console.log("   Keeping foreign webhook:", wh.url);
+      continue;
+    }
     console.log("   Removing old webhook:", wh.url);
     await deleteWebhook(wh.id);
   }
 
   // Only the two events the gate acts on. "verified" is deliberately left out: its
   // REST record is shallow (no issuer) and would override the "data" judgement.
-  const webhook = await registerWebhook("Stormcatch verification receiver", webhookUrl, [
+  const webhook = await registerWebhook(WEBHOOK_NAME, webhookUrl, [
     "openid4vc.verification.data",
     "openid4vc.verification.failed",
   ]);
