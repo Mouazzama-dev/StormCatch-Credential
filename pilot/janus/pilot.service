@@ -1,5 +1,5 @@
 [Unit]
-Description=Stormcatch pilot stack, gate box (engine, decision, gate, tunnel + webhook, e-paper loop)
+Description=Stormcatch pilot stack, gate box (engine, decision, gate, e-paper loop); tunnel + webhook in pilot-tunnel.service
 
 [Service]
 Type=oneshot
@@ -8,10 +8,8 @@ WorkingDirectory=%h
 # User units have no network-online target: wait for NetworkManager to report full connectivity (max 2 min).
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do [ "$(nmcli -g CONNECTIVITY general 2>/dev/null)" = full ] && exit 0; sleep 2; done; exit 0'
 ExecStart=%h/janus-start.sh
-ExecStart=%h/janus-tunnel.sh
 ExecStart=%h/janus-display.sh
 ExecStop=%h/janus-display.sh stop
-ExecStop=%h/janus-tunnel.sh stop
 ExecStop=%h/janus-start.sh stop
 KillMode=control-group
 TimeoutStartSec=240

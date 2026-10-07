@@ -19,7 +19,8 @@ for attempt in 1 2 3 4 5; do
     sleep 1
   done
   [ -n "$URL" ] && break
-  echo "tunnel attempt $attempt failed: $(tail -1 "$LOGS/tunnel.log" | cut -c1-160)"; sleep $((attempt * 10))
+  echo "tunnel attempt $attempt failed: $(tail -1 "$LOGS/tunnel.log" | cut -c1-160)"
+  [ "$attempt" -lt 5 ] && sleep $((attempt * 10))
 done
 [ -n "$URL" ] || { echo "no tunnel url after 5 attempts"; rm -f "$HOME/.pilot-tunnel-url"; exit 1; }
 echo "$URL" > "$HOME/.pilot-tunnel-url"; echo "tunnel: $URL"

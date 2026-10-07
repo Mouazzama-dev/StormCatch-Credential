@@ -15,14 +15,22 @@ All services bind to loopback except the gate, which bishop reaches over the LAN
 
 ```sh
 cp pilot/<box>/*.sh pilot/<box>/*.py ~/
-mkdir -p ~/.config/systemd/user && cp pilot/<box>/pilot.service ~/.config/systemd/user/
+mkdir -p ~/.config/systemd/user && cp pilot/<box>/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now pilot.service
+systemctl --user enable --now pilot-tunnel.service   # janus only
 sudo loginctl enable-linger $USER   # once, so the unit starts at boot without a login
 ```
 
 `<box>-start.sh status` prints the processes and a health line per port. Logs go to
 `~/pilot-logs/`. The unit waits for NetworkManager to report full connectivity before
 starting, up to two minutes.
+
+On janus the Cloudflare tunnel and the Paradym webhook registration live in
+`pilot-tunnel.service`, bound to `pilot.service` and restarted on failure every 30 s.
+A tunnel that fails at boot therefore leaves engine, gate and display running; reads end
+in a DENY until the webhook is registered again. Both scripts exit non-zero when the
+tunnel does not answer or the registration is refused, so `systemctl --user status
+pilot-tunnel` shows the real state.
 
 ## Secrets
 
