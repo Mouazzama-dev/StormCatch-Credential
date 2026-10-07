@@ -33,10 +33,32 @@ export const gateOpenapi = {
         },
       },
     },
+    "/request/{uuid}": {
+      get: {
+        summary: "Resolve a request uuid read off the e-paper",
+        description:
+          "The reader decodes <invitation>/<request> from the QR and resolves the request uuid " +
+          "(case-insensitive) to the session and the exact authorization request URI, client_id included.",
+        parameters: [{ name: "uuid", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Session found", content: { "application/json": { schema: {
+            type: "object",
+            properties: {
+              sessionId: { type: "string" },
+              gate: { type: "string", enum: ["G-1", "G-2"] },
+              authorizationRequestUri: { type: "string" },
+            },
+          } } } },
+          "404": { description: "Unknown request uuid" },
+        },
+      },
+    },
     "/webhook": {
       post: {
         summary: "Paradym verification events (internal)",
-        description: "Register this URL (via ngrok) in the gate wallet. Not called by clients.",
+        description:
+          "Register this URL (via the tunnel) in the gate wallet. With WEBHOOK_TOKEN set the live " +
+          "path is /webhook/<token>; the bare path stays LAN-only. Not called by clients.",
         responses: { "200": { description: "Received" } },
       },
     },
