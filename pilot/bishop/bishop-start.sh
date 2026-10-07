@@ -6,6 +6,7 @@ export PATH=$HOME/.local/opt/node/bin:$HOME/.local/bin:$PATH
 export GATE_URL=${GATE_URL:-http://192.168.178.101:4002}
 CC=$HOME/StormCatch-Credential-Core/robot-agent
 LOGS=$HOME/pilot-logs; mkdir -p "$LOGS"
+rotate_logs() { for f in "$LOGS"/*.log; do [ -f "$f" ] && mv -f "$f" "$f.1"; done; }
 
 ports() { ss -ltn 2>/dev/null | grep -E ":(4004|8000|8090) " | awk '{print $4}' | sort; }
 procs() { pgrep -af "[r]obot-service.ts|[c]am_stream.py|[q]r_dashboard.py|[q]r_present.py" | cut -c1-80; }
@@ -20,6 +21,7 @@ case "${1:-start}" in
 esac
 
 stop_all
+rotate_logs
 ( cd "$CC" && setsid nohup ./node_modules/.bin/tsx src/robot-service.ts > "$LOGS/robot-service.log" 2>&1 < /dev/null & )
 cd "$HOME"
 setsid nohup python3 "$HOME/cam_stream.py" >> "$LOGS/cam_stream.log" 2>&1 < /dev/null &

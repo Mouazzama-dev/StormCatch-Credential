@@ -55,9 +55,14 @@ class Handler(server.BaseHTTPRequestHandler):
                     self.send_header("Content-Length", len(frame)); self.end_headers()
                     self.wfile.write(frame); self.wfile.write(b"\r\n")
             except Exception as e:
-                logging.warning("client %s left: %s", self.client_address, e)
+                logging.debug("client %s left: %s", self.client_address, e)
         else:
             self.send_error(404); self.end_headers()
+
+    def log_request(self, code="-", size="-"):
+        # The reader and the dashboard poll /snapshot.jpg several times a second; one line
+        # per request filled 6 MB in a morning. Errors still go through log_error.
+        pass
 
 class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
