@@ -13,4 +13,5 @@ done
 echo "$URL" > "$HOME/.pilot-tunnel-url"; echo "tunnel: $URL"
 for i in $(seq 1 10); do c=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$URL/health"); [ "$c" = "200" ] && break; sleep 3; done
 echo "via tunnel: $c"
-cd "$HOME/StormCatch-Credential-Core" && SERVICE_ROLE=gate ./node_modules/.bin/tsx --env-file=.env src/scripts/register-webhook.ts "$URL" 2>&1 | tail -4
+WHTOK=$(cat "$HOME/.pilot-webhook-token" 2>/dev/null || true)
+cd "$HOME/StormCatch-Credential-Core" && SERVICE_ROLE=gate WEBHOOK_TOKEN=$WHTOK ./node_modules/.bin/tsx --env-file=.env src/scripts/register-webhook.ts "$URL" 2>&1 | tail -4
