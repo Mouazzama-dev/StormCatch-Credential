@@ -51,8 +51,16 @@ const byRequest = new Map<string, string>();
 const judgedFrom = new Map<string, "data" | "record">();
 const SESSION_TTL_MS = 60 * 60_000;
 
+// Paradym hands the request URI back URL-encoded inside the invitation link
+// (".../invitation?request_uri=https%3A%2F%2F..."), so decode before matching.
 function requestUuidOf(uri: string): string | undefined {
-  const m = /authorization-requests\/([0-9a-f-]{36})/i.exec(uri);
+  let decoded = uri;
+  try {
+    decoded = decodeURIComponent(uri);
+  } catch {
+    // keep the raw string; the match below simply fails
+  }
+  const m = /authorization-requests\/([0-9a-f-]{36})/i.exec(decoded);
   return m?.[1].toLowerCase();
 }
 
