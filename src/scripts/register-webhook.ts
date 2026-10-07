@@ -19,7 +19,12 @@ async function main() {
     await deleteWebhook(wh.id);
   }
 
-  const webhook = await registerWebhook("Stormcatch verification receiver", webhookUrl);
+  // Only the two events the gate acts on. "verified" is deliberately left out: its
+  // REST record is shallow (no issuer) and would override the "data" judgement.
+  const webhook = await registerWebhook("Stormcatch verification receiver", webhookUrl, [
+    "openid4vc.verification.data",
+    "openid4vc.verification.failed",
+  ]);
 
   console.log("\n✅ Webhook registered:");
   console.log("   id     :", webhook.id);

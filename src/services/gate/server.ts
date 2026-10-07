@@ -108,6 +108,8 @@ app.post("/verify", async (req: Request, res: Response) => {
 
 // Judge one verified session: Paradym has already checked signature + revocation
 // (isValid); the policy decision is delegated to the engine (async; results updated when done).
+const judgedFromData = new Set<string>();
+
 function judgeVerification(sessionId: string, verification: any): void {
   const cred = verification?.credentials?.[0];
   const existing = results.get(sessionId);
@@ -139,16 +141,29 @@ app.post("/webhook", (req: Request, res: Response) => {
   const eventType = body?.eventType ?? "unknown";
   const v = body?.payload?.openId4VcVerification;
   const sessionId = v?.id ?? body?.payload?.openId4VcVerificationId;
+  console.log(`[webhook] ${eventType} session=${sessionId ?? "?"} creds=${v?.credentials?.length ?? "-"} issuer=${v?.credentials?.[0]?.issuer ?? v?.credentials?.[0]?.issuerId ?? "-"}`);
 
   // Two event shapes: "verification.data" carries the credentials inline (older Paradym
   // behaviour); "verification.verified" carries only the session id and the record has to
   // be fetched. Both end in the same judgement.
+  // Paradym sends both for one session, "verified" first. The "data" event carries the
+  // full credential (issuer included); the REST record behind "verified" is shallow and
+  // would turn an ALLOW into a trust DENY. The fetch started by "verified" resolves after
+  // "data" has been judged, so the check happens again once the record is back.
   if (sessionId && eventType === "openid4vc.verification.data") {
+    judgedFromData.add(sessionId);
     judgeVerification(sessionId, v);
-  } else if (sessionId && eventType === "openid4vc.verification.verified") {
+  } else if (sessionId && eventType === "openid4vc.verification.verified" && !judgedFromData.has(sessionId)) {
     paradymFetch<any>(walletPath(`/openid4vc/verification/${sessionId}`))
-      .then((record) => judgeVerification(sessionId, record))
+      .then((record) => {
+        if (judgedFromData.has(sessionId)) {
+          console.log(`[webhook] verified record ignored, data already judged session=${sessionId}`);
+          return;
+        }
+        judgeVerification(sessionId, record);
+      })
       .catch((err) => {
+        if (judgedFromData.has(sessionId)) return;
         results.set(sessionId, { status: "denied", reason: `session-fetch-error: ${err.message}` });
         console.log(`DENY (session-fetch-error) session=${sessionId}: ${err.message}`);
       });
