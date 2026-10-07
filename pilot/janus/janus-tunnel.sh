@@ -27,4 +27,11 @@ for i in $(seq 1 10); do c=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$URL/
 echo "via tunnel: $c"
 [ "$c" = "200" ] || { echo "tunnel not reachable, webhook left as is"; exit 1; }
 WHTOK=$(cat "$HOME/.pilot-webhook-token" 2>/dev/null || true)
-cd "$HOME/StormCatch-Credential-Core" && SERVICE_ROLE=gate WEBHOOK_TOKEN=$WHTOK ./node_modules/.bin/tsx --env-file=.env src/scripts/register-webhook.ts "$URL" 2>&1 | tail -4
+[ -n "$WHTOK" ] || { echo "no webhook token at ~/.pilot-webhook-token, webhook left as is"; exit 1; }
+# A failed registration must fail the script: a tunnel without a webhook means every read is a DENY.
+cd "$HOME/StormCatch-Credential-Core" || exit 1
+if SERVICE_ROLE=gate WEBHOOK_TOKEN=$WHTOK ./node_modules/.bin/tsx --env-file=.env src/scripts/register-webhook.ts "$URL" > "$LOGS/register-webhook.log" 2>&1; then
+  tail -4 "$LOGS/register-webhook.log"
+else
+  echo "webhook registration FAILED:"; tail -4 "$LOGS/register-webhook.log"; exit 1
+fi

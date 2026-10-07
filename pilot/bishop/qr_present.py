@@ -28,7 +28,8 @@ Environment (all optional):
   STATUS_FILE  default ~/pilot-logs/reader_status.json
   ROBOT_URL    default http://127.0.0.1:4004
   GATE_URL     default http://10.10.1.214:4002 (janus on the LAN); empty = skip
-  CLIENT_ID    verifier DID, default the pilot facility DID on Paradym
+  CLIENT_ID    verifier DID for the local link rebuild, used only when the gate's
+               /request/{uuid} lookup fails (the gate copy already carries it)
   MODELS_DIR   default ~/wechat_qr
 """
 import argparse
@@ -65,11 +66,26 @@ def log(msg: str) -> None:
 
 
 def expand(payload: str) -> tuple[str, str | None]:
-    """Return (authorizationRequestUri, requestId). Full URLs pass through."""
+    """Return (authorizationRequestUri, requestId). Full URLs pass through.
+
+    The gate keeps the exact link it created (client_id included), so a compact
+    code is resolved there first. The local rebuild with CLIENT_ID is only the
+    fallback for when the gate cannot answer; a wrong CLIENT_ID there means a
+    client_id mismatch on Paradym and a DENY.
+    """
     m = COMPACT.match(payload.strip())
     if not m:
         return payload.strip(), None
     inv, req = m.group(1).lower(), m.group(2).lower()
+    if GATE_URL:
+        try:
+            code, found = get_json(f"{GATE_URL}/request/{req}", timeout=5)
+        except Exception as e:
+            code, found = 0, {}
+            log(f"gate request lookup error: {e}")
+        if code == 200 and found.get("authorizationRequestUri"):
+            return found["authorizationRequestUri"], req
+        log(f"gate request lookup {code}: rebuilding the link locally")
     request_uri = f"https://paradym.id/invitation/{inv}/authorization-requests/{req}?raw=true"
     query = urllib.parse.urlencode({"request_uri": request_uri, "client_id": CLIENT_ID})
     return f"https://paradym.id/invitation?{query}", req
