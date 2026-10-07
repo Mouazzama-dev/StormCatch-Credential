@@ -29,3 +29,14 @@ test("gate: GET /openapi.json is served", async (t) => {
   assert.equal(status, 200);
   assert.ok(json.paths["/verify"], "documents /verify");
 });
+
+test("gate: tunnel traffic reaches /health and the webhook only", async (t) => {
+  if (!(await up(BASE.gate))) return t.skip("gate not running");
+  const viaTunnel = { "cf-ray": "test-ray" };
+  const health = await fetch(`${BASE.gate}/health`, { headers: viaTunnel });
+  assert.equal(health.status, 200);
+  const result = await fetch(`${BASE.gate}/result/does-not-exist`, { headers: viaTunnel });
+  assert.equal(result.status, 403);
+  const openapi = await fetch(`${BASE.gate}/openapi.json`, { headers: viaTunnel });
+  assert.equal(openapi.status, 403);
+});
