@@ -17,7 +17,7 @@ import { OpenId4VcModule } from "@credo-ts/openid4vc";
 export async function setupAgent() {
   const app = express();
   const agent = new Agent({
-    config: { label: "robot-holder" },
+    config: { label: "robot-holder", allowInsecureHttpUrls: true },
     dependencies: agentDependencies,
     modules: {
       askar: new AskarModule({ askar, store: { id: "robot-holder", key: "insecure-demo-key" } }),
