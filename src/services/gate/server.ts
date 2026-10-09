@@ -4,6 +4,7 @@ import { paradymFetch, walletPath } from "../../client.ts";
 import { config } from "../../config.ts";
 import { mountDocs } from "../_docs.ts";
 import { gateOpenapi } from "./openapi.ts";
+import { pickTaskAuth } from "../decision/credentials.ts";
 
 // gate-service: the verifier (checkpoint). Creates a verification request, receives the
 // presentation via webhook, then delegates the allow/deny decision to the policy engine
@@ -50,7 +51,9 @@ async function decideViaEngine(
   gate: string,
   verification: any
 ): Promise<Outcome> {
-  const cred = verification?.credentials?.[0];
+  // The task authorization by vct, not by position: a robot with a birth certificate presents
+  // two credentials and the holder orders them.
+  const cred = pickTaskAuth(verification);
   const attributes = (cred?.presentedAttributes ?? {}) as Record<string, unknown>;
   // The presented issuer: Paradym's per-credential issuer when present, else the iss claim.
   // A missing or empty value stays absent on the wire.

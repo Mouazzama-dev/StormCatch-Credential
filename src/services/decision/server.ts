@@ -2,6 +2,7 @@ import express from "express";
 import type { Request, Response } from "express";
 import { mountDocs } from "../_docs.ts";
 import { decisionOpenapi } from "./openapi.ts";
+import { birthFacts, pickBirthCertificate, pickTaskAuth } from "./credentials.ts";
 
 // decision-service: adapter between the gate and the policy engine's HTTP API
 // (@stormcatch/authoriser `pnpm api`, POST http://127.0.0.1:5174/api/authorize).
@@ -103,7 +104,9 @@ app.post("/decision", async (req: Request, res: Response) => {
   }
 
   // Prefer the presented claims from the forwarded session; fall back to the flat fields.
-  const credential = session?.credentials?.[0];
+  // The task authorization is picked by its vct, not by position: since the birth
+  // certificate bridge the holder may present two credentials in either order.
+  const credential = pickTaskAuth(session);
   const presented = (credential?.presentedAttributes ?? {}) as Record<string, unknown>;
   const action = presented.action ?? req.body?.action;
   const scope = presented.scope ?? req.body?.scope;
@@ -119,7 +122,20 @@ app.post("/decision", async (req: Request, res: Response) => {
   const presentedIssuer = typeof issuer === "string" && issuer.length > 0 ? issuer : null;
   robot.taskAuthIssuer = presentedIssuer ?? TRUSTED_TASKAUTH_ISSUER;
 
-  console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
+  // Serial and model come from the birth certificate when one is presented, from the
+  // baseline otherwise (no robot presents one at the pilot gate yet). A presented
+  // certificate whose `birthEK` lacks a field keeps the baseline for that field and says so
+  // in the log: the same named gap as the issuer fallback above, and the same rule, one line
+  // per decision that tells which facts were real.
+  const birth = pickBirthCertificate(session);
+  const facts = birthFacts(birth);
+  if (facts.serialNumber !== undefined) robot.serialNumber = facts.serialNumber;
+  if (facts.model !== undefined) robot.model = facts.model;
+  const identitySource = birth
+    ? `birth certificate (serial ${facts.serialNumber ? "read" : "MISSING, baseline kept"}, model ${facts.model ? "read" : "MISSING, baseline kept"}, uid not derived)`
+    : "baseline (no birth certificate presented)";
+
+  console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now, "| identity:", identitySource, "serial:", robot.serialNumber, "model:", robot.model);
 
   const authorizeBody = {
     actionId: "passCheckpoint",
