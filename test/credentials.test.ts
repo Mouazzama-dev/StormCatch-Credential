@@ -104,4 +104,3 @@ test("the robot uid is a URN of model and serial, and absent when either is miss
   assert.equal(robotUid({ model: "SC-Model-X" }), undefined);
   assert.equal(robotUid({}), undefined);
 });
-

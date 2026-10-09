@@ -119,4 +119,3 @@ export function robotUid(facts: BirthFacts): string | undefined {
   if (facts.serialNumber === undefined || facts.model === undefined) return undefined;
   return `${ROBOT_URN_PREFIX}${encodeURIComponent(facts.model)}:${encodeURIComponent(facts.serialNumber)}`;
 }
-
