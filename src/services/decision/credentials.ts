@@ -106,3 +106,17 @@ export function birthFacts(c: SessionCredential | undefined): BirthFacts {
   if (typeof e.model === "string" && e.model !== "") out.model = e.model;
   return out;
 }
+
+// The robot's identity as the engine's uid, from the pair that keys the robot everywhere in
+// the certificate model (the robot-provisioning draft of 2026-10-09: "certificates link to
+// the robot record", keyed SerialNumber + ModelCode). A URN, because the birth-certificate
+// schema requires the subject id to be a URI; the two parts are percent-encoded so a serial
+// with a slash or a space cannot forge another robot's name. Undefined when either part is
+// missing: half an identity is no identity, and the engine's absent-uid path handles it.
+export const ROBOT_URN_PREFIX = "urn:stormcatch:robot:";
+
+export function robotUid(facts: BirthFacts): string | undefined {
+  if (facts.serialNumber === undefined || facts.model === undefined) return undefined;
+  return `${ROBOT_URN_PREFIX}${encodeURIComponent(facts.model)}:${encodeURIComponent(facts.serialNumber)}`;
+}
+

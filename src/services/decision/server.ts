@@ -2,7 +2,7 @@ import express from "express";
 import type { Request, Response } from "express";
 import { mountDocs } from "../_docs.ts";
 import { decisionOpenapi } from "./openapi.ts";
-import { anchoredBirthFacts, issuerKey, pickBirthCertificate, pickTaskAuth } from "./credentials.ts";
+import { anchoredBirthFacts, issuerKey, pickBirthCertificate, pickTaskAuth, robotUid } from "./credentials.ts";
 
 // decision-service: adapter between the gate and the policy engine's HTTP API
 // (@stormcatch/authoriser `pnpm api`, POST http://127.0.0.1:5174/api/authorize).
@@ -143,11 +143,16 @@ app.post("/decision", async (req: Request, res: Response) => {
   const { facts, issuer: birthIssuer, anchored } = anchoredBirthFacts(birth, BIRTH_CERT_ANCHORS);
   if (facts.serialNumber !== undefined) robot.serialNumber = facts.serialNumber;
   if (facts.model !== undefined) robot.model = facts.model;
+  // `machineDid` is the one key Layer 1 reads as "which machine these documents are for";
+  // it mints the birth certificate with that subject and the engine derives the uid back
+  // out of it, so the principal Cedar sees is this robot and not the baseline one.
+  const uid = robotUid(facts);
+  if (uid !== undefined) robot.machineDid = uid;
   const identitySource = !birth
     ? "baseline (no birth certificate presented)"
     : !anchored
       ? `baseline (birth certificate presented by UNANCHORED issuer ${birthIssuer ?? "(absent)"}, facts ignored)`
-      : `birth certificate from ${birthIssuer} (serial ${facts.serialNumber ? "read" : "MISSING, baseline kept"}, model ${facts.model ? "read" : "MISSING, baseline kept"}, uid not derived)`;
+      : `birth certificate from ${birthIssuer} (serial ${facts.serialNumber ? "read" : "MISSING, baseline kept"}, model ${facts.model ? "read" : "MISSING, baseline kept"}, uid ${uid ?? "not derived"})`;
 
   console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now, "| identity:", identitySource, "serial:", robot.serialNumber, "model:", robot.model);
 

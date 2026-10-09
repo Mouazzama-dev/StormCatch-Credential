@@ -11,6 +11,7 @@ import {
   issuerKey,
   pickBirthCertificate,
   pickTaskAuth,
+  robotUid,
 } from "../src/services/decision/credentials.ts";
 
 const TASK_VCT = "https://metadata.paradym.id/types/SvumIWqCOX-StormcatchTaskAuthorization";
@@ -95,3 +96,12 @@ test("birth facts are read only from an anchored issuer; an empty anchor list re
   assert.equal(anchoredBirthFacts(lookalike, [key]).anchored, false);
   assert.deepEqual(anchoredBirthFacts(undefined, [key]), { facts: {}, issuer: undefined, anchored: false });
 });
+
+test("the robot uid is a URN of model and serial, and absent when either is missing", () => {
+  assert.equal(robotUid({ serialNumber: "SC-ROBOT-0001", model: "SC-Model-X" }), "urn:stormcatch:robot:SC-Model-X:SC-ROBOT-0001");
+  assert.equal(robotUid({ serialNumber: "SC/ROBOT 1", model: "M:1" }), "urn:stormcatch:robot:M%3A1:SC%2FROBOT%201", "separators in the parts are encoded");
+  assert.equal(robotUid({ serialNumber: "SC-ROBOT-0001" }), undefined);
+  assert.equal(robotUid({ model: "SC-Model-X" }), undefined);
+  assert.equal(robotUid({}), undefined);
+});
+

@@ -9,6 +9,9 @@ LOGS=$HOME/pilot-logs; mkdir -p "$LOGS"
 rotate_logs() { for f in "$LOGS"/*.log; do [ -f "$f" ] && mv -f "$f" "$f.1"; done; }
 TOKFILE=$HOME/.pilot-engine-token
 WHTOKFILE=$HOME/.pilot-webhook-token
+# Birth-certificate issuers the decision service reads facts from: DIDs or sha256:<hex> leaf
+# fingerprints, one per line. Absent or empty, no birth certificate is read.
+ANCHORFILE=$HOME/.pilot-birth-anchors
 
 ports() { ss -ltnp 2>/dev/null | grep -E ':(4002|4003|5175) ' | awk '{print $4}' | sort; }
 
@@ -27,11 +30,12 @@ if [ -n "$(ports)" ]; then echo "already running:"; ports; exit 0; fi
 TOK=$(cat "$TOKFILE")
 [ -s "$WHTOKFILE" ] || head -c 24 /dev/urandom | base64 | tr -d '/+=\n' > "$WHTOKFILE"
 WHTOK=$(cat "$WHTOKFILE")
+ANCHORS=$( [ -s "$ANCHORFILE" ] && grep -v "^#" "$ANCHORFILE" | tr -s "\n" "," | sed "s/,$//" )
 rotate_logs
 
 ( cd "$SDK" && PORT=5175 HOST=127.0.0.1 TESTER_TOKEN=$TOK setsid nohup ./node_modules/.bin/tsx src/server/index.ts > "$LOGS/engine.log" 2>&1 < /dev/null & )
 cd "$CC"
-DECISION_HOST=127.0.0.1 ENGINE_URL=http://127.0.0.1:5175 ENGINE_TOKEN=$TOK setsid nohup ./node_modules/.bin/tsx --env-file=.env src/services/decision/server.ts > "$LOGS/decision.log" 2>&1 < /dev/null &
+DECISION_HOST=127.0.0.1 ENGINE_URL=http://127.0.0.1:5175 ENGINE_TOKEN=$TOK BIRTH_CERT_ANCHORS=$ANCHORS setsid nohup ./node_modules/.bin/tsx --env-file=.env src/services/decision/server.ts > "$LOGS/decision.log" 2>&1 < /dev/null &
 GATE_HOST=0.0.0.0 DECISION_HOST=127.0.0.1 SERVICE_ROLE=gate WEBHOOK_TOKEN=$WHTOK setsid nohup ./node_modules/.bin/tsx --env-file=.env src/services/gate/server.ts > "$LOGS/gate.log" 2>&1 < /dev/null &
 sleep 8
 echo "listeners:"; ports
