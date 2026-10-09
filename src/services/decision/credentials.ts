@@ -7,6 +7,8 @@
 // and `credentials[0]` is whichever the holder put first. So the pick is by `vct`, the type
 // claim Paradym copies into presentedAttributes, never by position.
 
+import { createHash } from "node:crypto";
+
 export type SessionCredential = {
   isValid?: boolean;
   issuer?: unknown;
@@ -63,6 +65,37 @@ export function pickBirthCertificate(session: unknown): SessionCredential | unde
 // same on every robot. Which claim stands for the robot (`hwUuid`, `tpmEkHash`, other) is
 // asked of the bridge's author on 2026-10-09; until answered the uid stays unset.
 export type BirthFacts = { serialNumber?: string; model?: string };
+
+// The issuer of a credential as one comparable string: a DID as Paradym sends it, or for an
+// X.509 issuer (`{certificate, commonName}`) the SHA-256 fingerprint of the certificate's
+// DER, `sha256:<hex>`, the same value `openssl x509 -fingerprint -sha256` prints without the
+// colons. The commonName is never used: any certificate can carry any name.
+export function issuerKey(c: SessionCredential | undefined): string | undefined {
+  const issuer = c?.issuer;
+  if (typeof issuer === "string") return issuer.length > 0 ? issuer : undefined;
+  if (!issuer || typeof issuer !== "object") return undefined;
+  const pem = (issuer as { certificate?: unknown }).certificate;
+  if (typeof pem !== "string") return undefined;
+  const body = pem.replace(/-----(BEGIN|END) CERTIFICATE-----/g, "").replace(/\s+/g, "");
+  if (body === "") return undefined;
+  const der = Buffer.from(body, "base64");
+  return `sha256:${createHash("sha256").update(der).digest("hex")}`;
+}
+
+// Facts are read only from a credential whose issuer is on the anchor list, because the
+// platform's "verified" binds no issuer: a presentation template without a trusted entity
+// accepts any signer, and a self-signed birth certificate would otherwise choose its own
+// serial and walk past a deny entry on the real one. Anchors are leaf fingerprints or DIDs
+// until the engine validates X.509 chains against the Stormcatch root (planned beside the
+// trust list's X.509 entry kind); an empty list reads nothing.
+export function anchoredBirthFacts(
+  c: SessionCredential | undefined,
+  anchors: readonly string[],
+): { facts: BirthFacts; issuer: string | undefined; anchored: boolean } {
+  const issuer = issuerKey(c);
+  const anchored = issuer !== undefined && anchors.includes(issuer);
+  return { facts: anchored ? birthFacts(c) : {}, issuer, anchored };
+}
 
 export function birthFacts(c: SessionCredential | undefined): BirthFacts {
   const ek = attrs(c).birthEK;
