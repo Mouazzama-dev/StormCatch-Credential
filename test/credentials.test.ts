@@ -3,11 +3,15 @@
 // crt-demo sample of 2026-10-08 as Paradym would present it (nested claims under birthEK).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   BIRTH_CERTIFICATE_VCT,
+  anchoredBirthFacts,
   birthFacts,
+  issuerKey,
   pickBirthCertificate,
   pickTaskAuth,
+  robotUid,
 } from "../src/services/decision/credentials.ts";
 
 const TASK_VCT = "https://metadata.paradym.id/types/SvumIWqCOX-StormcatchTaskAuthorization";
@@ -62,4 +66,41 @@ test("a missing or malformed birthEK field stays absent rather than defaulted", 
   assert.deepEqual(birthFacts({ presentedAttributes: { birthEK: "SC-ROBOT-0001" } }), {});
   assert.deepEqual(birthFacts({ presentedAttributes: { birthEK: { serial: "", model: 7 } } }), {});
   assert.deepEqual(birthFacts({ presentedAttributes: { birthEK: { model: "SC-Model-X" } } }), { model: "SC-Model-X" });
+});
+
+test("an X.509 issuer is keyed by its certificate fingerprint, never by its commonName", () => {
+  const der = Buffer.from("not really a certificate, but bytes");
+  const pem = `-----BEGIN CERTIFICATE-----\n${der.toString("base64").match(/.{1,64}/g)!.join("\n")}\n-----END CERTIFICATE-----\n`;
+  const expected = `sha256:${createHash("sha256").update(der).digest("hex")}`;
+  assert.equal(issuerKey({ issuer: { certificate: pem, commonName: "anything" } }), expected);
+  assert.equal(issuerKey({ issuer: { certificate: pem.replace(/\n/g, ""), commonName: "x" } }), expected, "line wrapping does not change the key");
+  assert.equal(issuerKey({ issuer: "did:web:example" }), "did:web:example");
+  assert.equal(issuerKey({ issuer: "" }), undefined);
+  assert.equal(issuerKey({ issuer: { commonName: "no certificate" } }), undefined);
+  assert.equal(issuerKey(undefined), undefined);
+});
+
+test("birth facts are read only from an anchored issuer; an empty anchor list reads nothing", () => {
+  const pem = "-----BEGIN CERTIFICATE-----\nAAEC\n-----END CERTIFICATE-----";
+  const key = issuerKey({ issuer: { certificate: pem, commonName: "x" } })!;
+  const anchoredBirth = { ...birth, issuer: { certificate: pem, commonName: "Stormcatch Certificate Manager Credential Issuer" } };
+  assert.deepEqual(anchoredBirthFacts(anchoredBirth, [key]), {
+    facts: { serialNumber: "SC-ROBOT-0001", model: "SC-Model-X" },
+    issuer: key,
+    anchored: true,
+  });
+  assert.deepEqual(anchoredBirthFacts(anchoredBirth, []), { facts: {}, issuer: key, anchored: false });
+  assert.deepEqual(anchoredBirthFacts(anchoredBirth, ["sha256:0000"]), { facts: {}, issuer: key, anchored: false });
+  // Same commonName, different certificate: not anchored.
+  const lookalike = { ...anchoredBirth, issuer: { certificate: "-----BEGIN CERTIFICATE-----\nAAED\n-----END CERTIFICATE-----", commonName: "Stormcatch Certificate Manager Credential Issuer" } };
+  assert.equal(anchoredBirthFacts(lookalike, [key]).anchored, false);
+  assert.deepEqual(anchoredBirthFacts(undefined, [key]), { facts: {}, issuer: undefined, anchored: false });
+});
+
+test("the robot uid is a URN of model and serial, and absent when either is missing", () => {
+  assert.equal(robotUid({ serialNumber: "SC-ROBOT-0001", model: "SC-Model-X" }), "urn:stormcatch:robot:SC-Model-X:SC-ROBOT-0001");
+  assert.equal(robotUid({ serialNumber: "SC/ROBOT 1", model: "M:1" }), "urn:stormcatch:robot:M%3A1:SC%2FROBOT%201", "separators in the parts are encoded");
+  assert.equal(robotUid({ serialNumber: "SC-ROBOT-0001" }), undefined);
+  assert.equal(robotUid({ model: "SC-Model-X" }), undefined);
+  assert.equal(robotUid({}), undefined);
 });

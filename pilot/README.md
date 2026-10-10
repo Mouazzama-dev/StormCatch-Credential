@@ -44,3 +44,20 @@ Paradym key and wallet ids from `StormCatch-Credential-Core/.env`. Keep it that 
 `sudo systemctl reboot` on janus: SSH back after 32 s, gate healthy, new quick-tunnel URL,
 webhook on the gate wallet re-pointed at it, fresh code on the e-paper after 50 s. No
 hands on the box.
+
+## QR sweep
+
+`tools/qr_sweep.py` measures which QR version and physical size the bishop camera decodes
+at a given distance: 16 variants (V4 to V10, module 3 to 8 px, 28 to 60 mm on the 4.2"
+panel), each shown on the janus e-paper for a fixed hold while bishop decodes every
+snapshot frame with the same WeChat detector as the reader. The payload has the shape of
+the real compact gate code, with the variant in the first eight characters.
+
+Put the janus display inside the bishop camera frame at a known distance, copy
+`tools/qr_sweep.py` to `~` on both boxes, then from the laptop:
+
+    pilot/tools/qr_sweep.sh 200cm
+
+It pauses the display loop and the reader, runs about five minutes, restores both and
+prints a markdown table (frames, decoded, rate, first-decode latency, decode time per
+variant). Files land in `~/work_vault/00_PILOT_V0/sweeps/`. Repeat per distance.

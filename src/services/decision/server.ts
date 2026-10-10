@@ -2,7 +2,7 @@ import express from "express";
 import type { Request, Response } from "express";
 import { mountDocs } from "../_docs.ts";
 import { decisionOpenapi } from "./openapi.ts";
-import { birthFacts, pickBirthCertificate, pickTaskAuth } from "./credentials.ts";
+import { anchoredBirthFacts, issuerKey, pickBirthCertificate, pickTaskAuth, robotUid } from "./credentials.ts";
 
 // decision-service: adapter between the gate and the policy engine's HTTP API
 // (@stormcatch/authoriser `pnpm api`, POST http://127.0.0.1:5174/api/authorize).
@@ -34,6 +34,13 @@ const HOST = process.env.DECISION_HOST;
 const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:5174";
 const ENGINE_TOKEN = process.env.ENGINE_TOKEN;
 const TRUSTED_TASKAUTH_ISSUER = "did:key:z6MkStormcatchIssue1";
+// Issuers whose birth certificates the decision service reads facts from: DIDs or
+// `sha256:<hex>` leaf fingerprints, comma-separated. Empty (the default) reads none. An
+// interim pin until the engine's trust list carries X.509 anchors and validates the chain.
+const BIRTH_CERT_ANCHORS: readonly string[] = (process.env.BIRTH_CERT_ANCHORS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s) => s.length > 0);
 
 function baselineRobot(now: number): Record<string, unknown> {
   return {
@@ -119,21 +126,33 @@ app.post("/decision", async (req: Request, res: Response) => {
   robot.taskAuthActions = action ? [String(action)] : [];
   robot.taskAuthScopes = scope !== undefined && scope !== null ? [String(scope)] : [];
   robot.taskAuthValidUntil = typeof validUntil === "number" ? validUntil : now + 3600;
-  const presentedIssuer = typeof issuer === "string" && issuer.length > 0 ? issuer : null;
+  // An ABSENT issuer falls back to the anchored one (the named gap above). A PRESENT issuer
+  // that is not a DID string, an X.509 `{certificate, commonName}`, must not take that road:
+  // it travels as its fingerprint, which no trust list entry matches today, so the trust
+  // stage refuses it instead of the fallback vouching for it.
+  const presentedIssuer =
+    typeof issuer === "string" && issuer.length > 0 ? issuer : (issuerKey(credential) ?? null);
   robot.taskAuthIssuer = presentedIssuer ?? TRUSTED_TASKAUTH_ISSUER;
 
-  // Serial and model come from the birth certificate when one is presented, from the
-  // baseline otherwise (no robot presents one at the pilot gate yet). A presented
-  // certificate whose `birthEK` lacks a field keeps the baseline for that field and says so
-  // in the log: the same named gap as the issuer fallback above, and the same rule, one line
-  // per decision that tells which facts were real.
+  // Serial and model come from the birth certificate when one is presented by an ANCHORED
+  // issuer, from the baseline otherwise (no robot presents one at the pilot gate yet). The
+  // platform's "verified" binds no issuer, so an unanchored certificate's facts are ignored,
+  // not trusted. A presented certificate whose `birthEK` lacks a field keeps the baseline for
+  // that field. The log says which facts were real, one line per decision.
   const birth = pickBirthCertificate(session);
-  const facts = birthFacts(birth);
+  const { facts, issuer: birthIssuer, anchored } = anchoredBirthFacts(birth, BIRTH_CERT_ANCHORS);
   if (facts.serialNumber !== undefined) robot.serialNumber = facts.serialNumber;
   if (facts.model !== undefined) robot.model = facts.model;
-  const identitySource = birth
-    ? `birth certificate (serial ${facts.serialNumber ? "read" : "MISSING, baseline kept"}, model ${facts.model ? "read" : "MISSING, baseline kept"}, uid not derived)`
-    : "baseline (no birth certificate presented)";
+  // `machineDid` is the one key Layer 1 reads as "which machine these documents are for";
+  // it mints the birth certificate with that subject and the engine derives the uid back
+  // out of it, so the principal Cedar sees is this robot and not the baseline one.
+  const uid = robotUid(facts);
+  if (uid !== undefined) robot.machineDid = uid;
+  const identitySource = !birth
+    ? "baseline (no birth certificate presented)"
+    : !anchored
+      ? `baseline (birth certificate presented by UNANCHORED issuer ${birthIssuer ?? "(absent)"}, facts ignored)`
+      : `birth certificate from ${birthIssuer} (serial ${facts.serialNumber ? "read" : "MISSING, baseline kept"}, model ${facts.model ? "read" : "MISSING, baseline kept"}, uid ${uid ?? "not derived"})`;
 
   console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now, "| identity:", identitySource, "serial:", robot.serialNumber, "model:", robot.model);
 
