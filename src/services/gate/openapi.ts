@@ -53,12 +53,21 @@ export const gateOpenapi = {
         },
       },
     },
-    "/webhook": {
+    "/webhook/{token}": {
       post: {
         summary: "Paradym verification events (internal)",
         description:
-          "Register this URL (via the tunnel) in the gate wallet. With WEBHOOK_TOKEN set the live " +
-          "path is /webhook/<token>; the bare path stays LAN-only. Not called by clients.",
+          "The live webhook when WEBHOOK_TOKEN is set: register this URL (via the tunnel) in the " +
+          "gate wallet. The token is the path secret; any other value is a 404 and the bare " +
+          "/webhook is not served at all. Not called by clients.",
+        parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Received" }, "404": { description: "Wrong token" } },
+      },
+    },
+    "/webhook": {
+      post: {
+        summary: "Paradym verification events, untokenised (local development only)",
+        description: "Served only when WEBHOOK_TOKEN is unset. Not called by clients.",
         responses: { "200": { description: "Received" } },
       },
     },

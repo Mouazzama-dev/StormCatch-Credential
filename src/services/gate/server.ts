@@ -275,7 +275,18 @@ function handleWebhook(req: Request, res: Response): void {
 
 // One webhook path only. With a token set the bare /webhook is gone as well: the LAN is
 // not trusted more than the tunnel, and the pilot test suite posts to the tokenised path.
-app.post(WEBHOOK_PATH, handleWebhook);
+// Literal paths on purpose: docs:check reads the route table from this source file.
+if (WEBHOOK_TOKEN) {
+  app.post("/webhook/:token", (req: Request, res: Response) => {
+    if (req.params.token !== WEBHOOK_TOKEN) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    return handleWebhook(req, res);
+  });
+} else {
+  app.post("/webhook", handleWebhook);
+}
 
 // Poll the outcome. Applies the no-presentation-timeout = DENY rule.
 // `?observer=1` (the gate display) reads without arming the timeout.
