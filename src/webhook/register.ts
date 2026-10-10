@@ -19,10 +19,10 @@ export async function listWebhooks(): Promise<Webhook[]> {
 }
 
 // Register a webhook pointing at the given public URL
-export async function registerWebhook(name: string, url: string): Promise<Webhook> {
+export async function registerWebhook(name: string, url: string, events?: string[]): Promise<Webhook> {
   return paradymFetch<Webhook>(walletPath("/webhooks"), {
     method: "POST",
-    body: JSON.stringify({ name, url }),
+    body: JSON.stringify(events ? { name, url, events } : { name, url }),
   });
 }
 

@@ -41,8 +41,63 @@ type Outcome =
 
 const results = new Map<string, Outcome>();
 
+// Per-session bookkeeping. The e-paper encodes only the two uuids of the authorization
+// request URI ("<invitation>/<request>"); byRequest maps the request uuid back to the
+// session so the robot can resolve the exact URI and poll by session id.
+type SessionMeta = { gate: string; createdAt: number; authorizationRequestUri: string; requestUuid?: string };
+const sessions = new Map<string, SessionMeta>();
+const byRequest = new Map<string, string>();
+// Which event judged the session: the full "data" event may replace a judgement made
+// from the shallow REST record, nothing else replaces a verdict.
+const judgedFrom = new Map<string, "data" | "record">();
+const SESSION_TTL_MS = 60 * 60_000;
+
+// Paradym hands the request URI back URL-encoded inside the invitation link
+// (".../invitation?request_uri=https%3A%2F%2F..."), so decode before matching.
+function requestUuidOf(uri: string): string | undefined {
+  let decoded = uri;
+  try {
+    decoded = decodeURIComponent(uri);
+  } catch {
+    // keep the raw string; the match below simply fails
+  }
+  const m = /authorization-requests\/([0-9a-f-]{36})/i.exec(decoded);
+  return m?.[1].toLowerCase();
+}
+
+// Accept a session id or a request uuid wherever a session is named.
+function resolveSessionId(raw: string): string {
+  return byRequest.get(raw.toLowerCase()) ?? raw;
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - SESSION_TTL_MS;
+  for (const [id, meta] of sessions) {
+    if (meta.createdAt > cutoff) continue;
+    sessions.delete(id);
+    results.delete(id);
+    judgedFrom.delete(id);
+    if (meta.requestUuid) byRequest.delete(meta.requestUuid);
+  }
+}, 10 * 60_000).unref();
+
 const app = express();
 app.use(express.json());
+
+// The gate sits behind a public tunnel so Paradym can reach the webhook. Only that path,
+// and only with the token in WEBHOOK_TOKEN, is served to tunnel traffic (cloudflared adds
+// cf-ray to every request it forwards). Everything else stays LAN-only.
+const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN ?? "";
+const WEBHOOK_PATH = WEBHOOK_TOKEN ? `/webhook/${WEBHOOK_TOKEN}` : "/webhook";
+app.use((req: Request, res: Response, next) => {
+  const viaTunnel = req.headers["cf-ray"] !== undefined;
+  const allowed = (req.method === "POST" && req.path === WEBHOOK_PATH) || (req.method === "GET" && req.path === "/health");
+  if (viaTunnel && !allowed) {
+    res.status(403).json({ error: "not served over the tunnel" });
+    return;
+  }
+  next();
+});
 
 app.get("/health", (_req: Request, res: Response) => res.json({ service: "gate", ok: true }));
 
@@ -102,6 +157,9 @@ app.post("/verify", async (req: Request, res: Response) => {
       walletPath("/openid4vc/verification/request"),
       { method: "POST", body: JSON.stringify({ presentationTemplateId: templateId }) }
     );
+    const requestUuid = requestUuidOf(request.authorizationRequestUri);
+    sessions.set(request.id, { gate, createdAt: Date.now(), authorizationRequestUri: request.authorizationRequestUri, requestUuid });
+    if (requestUuid) byRequest.set(requestUuid, request.id);
     results.set(request.id, { status: "pending", startedAt: Date.now(), gate });
     res.json({ sessionId: request.id, gate, authorizationRequestUri: request.authorizationRequestUri });
   } catch (err) {
@@ -109,12 +167,36 @@ app.post("/verify", async (req: Request, res: Response) => {
   }
 });
 
+// The robot reader decodes "<invitation>/<request>" off the e-paper and resolves it here
+// to the session and the exact authorization request URI, client_id included.
+app.get("/request/:uuid", (req: Request, res: Response) => {
+  const sessionId = byRequest.get(String(req.params.uuid).toLowerCase());
+  const meta = sessionId ? sessions.get(sessionId) : undefined;
+  if (!sessionId || !meta) {
+    res.status(404).json({ error: "unknown request" });
+    return;
+  }
+  res.json({ sessionId, gate: meta.gate, authorizationRequestUri: meta.authorizationRequestUri });
+});
+
 // Judge one verified session: Paradym has already checked signature + revocation
 // (isValid); the policy decision is delegated to the engine (async; results updated when done).
-function judgeVerification(sessionId: string, verification: any): void {
+// A verdict is final once stored. The one exception: the full "data" event may replace a
+// judgement made from the shallow REST record (source "record"), because that record has
+// no issuer and would turn a valid presentation into a trust DENY.
+function judgeVerification(sessionId: string, verification: any, source: "data" | "record"): void {
   const cred = verification?.credentials?.[0];
   const existing = results.get(sessionId);
-  const gate = existing && "gate" in existing ? existing.gate : "G-1";
+  const gate = sessions.get(sessionId)?.gate ?? (existing && "gate" in existing ? existing.gate : "G-1");
+
+  if (existing && existing.status !== "pending") {
+    const replaceable = judgedFrom.get(sessionId) === "record" && source === "data";
+    if (!replaceable) {
+      console.log(`[${gate}] verdict kept (${existing.status}), ${source} event ignored session=${sessionId}`);
+      return;
+    }
+  }
+  judgedFrom.set(sessionId, source);
 
   if (!(cred?.isValid ?? false)) {
     results.set(sessionId, { status: "denied", reason: "not-verified" });
@@ -136,39 +218,69 @@ function judgeVerification(sessionId: string, verification: any): void {
     });
 }
 
-// Paradym posts verification events here (register this URL via ngrok -> gate port).
-app.post("/webhook", (req: Request, res: Response) => {
+// Paradym sends "verified" and "data" for the same session, "verified" first. "data" carries
+// the full credential (issuer included); the REST record behind "verified" is shallow and
+// would turn an ALLOW into a trust DENY. So "verified" waits this long for "data" before it
+// falls back to the record. The receiver asks for data + failed only, but the subscription
+// filter has not been seen to take effect, so every event type must be safe here.
+const VERIFIED_GRACE_MS = Number(process.env.VERIFIED_GRACE_MS ?? 3000);
+
+function handleWebhook(req: Request, res: Response): void {
   const body = req.body;
   const eventType = body?.eventType ?? "unknown";
   const v = body?.payload?.openId4VcVerification;
   const sessionId = v?.id ?? body?.payload?.openId4VcVerificationId;
+  console.log(`[webhook] ${eventType} session=${sessionId ?? "?"} creds=${v?.credentials?.length ?? "-"} issuer=${v?.credentials?.[0]?.issuer ?? v?.credentials?.[0]?.issuerId ?? "-"}`);
 
-  // Two event shapes: "verification.data" carries the credentials inline (older Paradym
-  // behaviour); "verification.verified" carries only the session id and the record has to
-  // be fetched. Both end in the same judgement.
-  if (sessionId && eventType === "openid4vc.verification.data") {
-    judgeVerification(sessionId, v);
-  } else if (sessionId && eventType === "openid4vc.verification.verified") {
-    paradymFetch<any>(walletPath(`/openid4vc/verification/${sessionId}`))
-      .then((record) => judgeVerification(sessionId, record))
-      .catch((err) => {
-        results.set(sessionId, { status: "denied", reason: `session-fetch-error: ${err.message}` });
-        console.log(`DENY (session-fetch-error) session=${sessionId}: ${err.message}`);
-      });
+  // Only sessions this gate created are judged. The wallet is shared with other receivers,
+  // so events for foreign sessions arrive here too; a forged ALLOW for an unknown id must
+  // never become a verdict someone can later poll.
+  if (sessionId && !sessions.has(sessionId)) {
+    console.log(`[webhook] ignored, session not ours session=${sessionId}`);
+    res.status(200).json({ received: true });
+    return;
   }
 
-  if (sessionId && eventType === "openid4vc.verification.failed") {
-    results.set(sessionId, { status: "denied", reason: "verification.failed" });
-    console.log(`DENY (verification.failed) session=${sessionId}`);
+  if (sessionId && eventType === "openid4vc.verification.data") {
+    judgeVerification(sessionId, v, "data");
+  } else if (sessionId && eventType === "openid4vc.verification.verified" && !judgedFrom.has(sessionId)) {
+    setTimeout(() => {
+      if (judgedFrom.has(sessionId)) return;
+      paradymFetch<any>(walletPath(`/openid4vc/verification/${sessionId}`))
+        .then((record) => {
+          if (judgedFrom.has(sessionId)) {
+            console.log(`[webhook] verified record ignored, data already judged session=${sessionId}`);
+            return;
+          }
+          judgeVerification(sessionId, record, "record");
+        })
+        .catch((err) => {
+          if (judgedFrom.has(sessionId)) return;
+          // Judged from a failed record read: the full data event may still replace it.
+          judgedFrom.set(sessionId, "record");
+          results.set(sessionId, { status: "denied", reason: "session-fetch-error" });
+          console.log(`DENY (session-fetch-error) session=${sessionId}: ${err.message}`);
+        });
+    }, VERIFIED_GRACE_MS).unref();
+  } else if (sessionId && eventType === "openid4vc.verification.failed") {
+    const existing = results.get(sessionId);
+    if (!existing || existing.status === "pending") {
+      results.set(sessionId, { status: "denied", reason: "verification.failed" });
+      console.log(`DENY (verification.failed) session=${sessionId}`);
+    }
   }
 
   res.status(200).json({ received: true });
-});
+}
+
+// One webhook path only. With a token set the bare /webhook is gone as well: the LAN is
+// not trusted more than the tunnel, and the pilot test suite posts to the tokenised path.
+app.post(WEBHOOK_PATH, handleWebhook);
 
 // Poll the outcome. Applies the no-presentation-timeout = DENY rule.
 // `?observer=1` (the gate display) reads without arming the timeout.
 app.get("/result/:id", (req: Request, res: Response) => {
-  const id = String(req.params.id);
+  const id = resolveSessionId(String(req.params.id));
   const entry = results.get(id);
   if (!entry) {
     res.status(404).json({ error: "unknown session" });

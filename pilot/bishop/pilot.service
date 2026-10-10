@@ -1,0 +1,16 @@
+[Unit]
+Description=Stormcatch pilot stack, robot box (robot-service, camera, dashboard, QR reader)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do [ "$(nmcli -g CONNECTIVITY general 2>/dev/null)" = full ] && exit 0; sleep 2; done; exit 0'
+ExecStart=%h/bishop-start.sh
+ExecStop=%h/bishop-start.sh stop
+KillMode=control-group
+TimeoutStartSec=180
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

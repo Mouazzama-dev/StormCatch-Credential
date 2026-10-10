@@ -1,0 +1,22 @@
+[Unit]
+Description=Stormcatch pilot tunnel, gate box (Cloudflare quick tunnel + Paradym webhook registration)
+# The tunnel is its own unit so a Cloudflare failure at boot never takes engine, gate and
+# display down with it. On failure it retries on its own; the rest of the stack keeps running
+# and serves the LAN, every read is a DENY until the webhook is registered again.
+After=pilot.service
+BindsTo=pilot.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h
+ExecStart=%h/janus-tunnel.sh
+ExecStop=%h/janus-tunnel.sh stop
+KillMode=control-group
+TimeoutStartSec=400
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
