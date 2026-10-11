@@ -113,6 +113,25 @@ app.post("/decision", async (req: Request, res: Response) => {
   const presentedIssuer = typeof issuer === "string" && issuer.length > 0 ? issuer : null;
   robot.taskAuthIssuer = presentedIssuer ?? TRUSTED_TASKAUTH_ISSUER;
 
+  // A presented birth certificate (optional) supplies the robot's real identity: the engine
+  // derives serialNumber and model from what the credential carries, and the facility deny
+  // list keys on that real serial. It arrives as another credential in the forwarded session
+  // (vct urn:stormcatch:vct:birth-certificate), or as a flat { serial, model } for a direct
+  // caller. Task-auth-only robots keep the pilot defaults - the birth certificate is optional (GT-6).
+  const BIRTH_CERT_VCT = "urn:stormcatch:vct:birth-certificate";
+  const credentials = (session?.credentials ?? []) as Array<Record<string, unknown>>;
+  const birthCredential = credentials.find(
+    (c) => c?.vct === BIRTH_CERT_VCT || c?.credentialType === BIRTH_CERT_VCT,
+  );
+  const birthClaims = ((birthCredential?.presentedAttributes as Record<string, unknown>) ??
+    (req.body?.birthCert as Record<string, unknown> | undefined)) as Record<string, unknown> | undefined;
+  if (birthClaims) {
+    // crt-demo nests the birth-certificate fields under birthEK; accept flat claims too.
+    const ek = ((birthClaims.birthEK as Record<string, unknown>) ?? birthClaims) ?? {};
+    if (typeof ek.serial === "string" && ek.serial) robot.serialNumber = ek.serial;
+    if (typeof ek.model === "string" && ek.model) robot.model = ek.model;
+  }
+
   console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now);
 
   const authorizeBody = {
