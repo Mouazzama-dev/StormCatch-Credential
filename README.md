@@ -4,6 +4,8 @@ Credential-lifecycle spine for autonomous robot gate-authorisation, built on [Pa
 
 A robot arrives at a gate and is allowed or denied. The whole flow runs as independent containerised services with no phone wallet: a headless [Credo](https://credo.js.org) holder receives and presents the credential over OID4VP DCQL, Paradym verifies it, and the allow/deny decision comes from the Stormcatch policy engine.
 
+Two credentials flow through the system: a **task-authorisation** credential (a Paradym SD-JWT VC naming an action and scope) presented at the gate, and a **birth-certificate identity** credential issued by the Certificate Platform (Martin's crt-demo turns a Stormcatch X.509 certificate into an SD-JWT VC over OID4VCI, x5c-signed). The robot holds the birth certificate so the engine can read its real identity - the unit serial and model - and screen it against the facility deny list. See [Phase 3: partner integration](#phase-3-partner-integration).
+
 ## Services
 
 The credential backend is four containers, plus the policy engine which runs as its own service.
@@ -15,6 +17,7 @@ The credential backend is four containers, plus the policy engine which runs as 
 | decision | 4003 | Adapter. Turns a friendly request into the engine's full AuthorizeBody and forwards it. | `POST /decision` | `/docs` |
 | robot | 4004 | Headless Credo holder. Receives and presents credentials, no phone wallet. | `POST /accept`, `POST /present`, `POST /reset` | `/docs` |
 | policy engine | 5174 | RDI's `@stormcatch/authoriser`. Runs the staged pipeline (Layer 1, trust, deny, Cedar). Own repo. | `POST /api/authorize`, `/api/docs` | `/api/docs` |
+| certificate bridge | 8787 | Certificate Platform (Martin). Turns a Stormcatch X.509 certificate into a birth-certificate SD-JWT VC and issues it over OID4VCI. Own repo (crt-demo). | `credential.offer` (WebSocket `/ws`) | - |
 
 Every service serves its OpenAPI document at `/openapi.json` and Swagger UI at `/docs`. `pnpm docs:check` fails if any service's routes drift from its spec.
 
@@ -82,6 +85,20 @@ sequenceDiagram
     Note over O,E: then revoke and verify again, which is denied
 ```
 
+## Phase 3: partner integration
+
+The gate-authorisation flow above is the task-authorisation credential alone. Phase 3 brings in the two partner platforms, one arrow at a time:
+
+- **3a - the policy engine (Rocco).** The decision-service drives the real engine over `/api/authorize` and gets real verdicts (the Phase 2 mock is replaced; mock equals real).
+- **3b - the Certificate Platform (Martin).** crt-demo issues the robot's birth certificate as an SD-JWT VC (x5c-signed) over OID4VCI; the headless Credo holder accepts and stores it.
+- **3c - both at once.** The unit serial the birth certificate carries becomes the robot's identity in the engine's AuthorizeBody: a zone request permits, the facility deny list keyed on that serial turns it to a deny, and removing it restores the permit.
+
+The decision-service reads the birth certificate's identity (serial and model) from a presented credential (vct `urn:stormcatch:vct:birth-certificate`) or a flat `birthCert` field, and overrides the pilot defaults with it. A robot carrying only task authorisation keeps the defaults, so the birth certificate is optional.
+
+The phase tests and a live demo UI live in their own repos ([credential-lifecycle-phase-tests](https://github.com/Stormcatch/credential-lifecycle-phase-tests) and [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui)). To run 3c end to end, start crt-demo (`npm run dev:server`), the robot holder (`pnpm robot` in `robot-agent/`) and the engine (`pnpm api`), then run the 3c test or open the UI's End-to-end tab.
+
+Still stubbed (Phase 4): anchoring the birth certificate's signing chain (Martin's CA root) at the engine, and presenting the birth certificate through a real gate rather than passing the serial to the engine directly.
+
 ## Running it
 
 You need a Paradym account (two wallets: one facility/issuer, one gate/verifier), the policy engine repo checked out as a sibling, ngrok, and Docker.
@@ -116,6 +133,8 @@ Two Paradym wallets separate the actors. The facility wallet is the issuer; the 
 
 The policy engine runs a second, independent trust check (Layer 1 plus a trust list). In the current pilot phase the decision-service sends an anchored `did:key` placeholder as the credential issuer so the engine's trust stage passes; aligning the engine's trust list to screen the real `did:web` issuer is a planned follow-up.
 
+The robot's identity comes from the birth-certificate credential, not a baseline: the engine derives the serial and model from it and keys the facility deny list on the real serial, so a recalled unit is refused even with valid task authorisation. The birth certificate's x5c signing chain is trusted on presentation for the demo; anchoring Martin's CA root at the engine is the planned trust follow-up (Phase 4).
+
 ## Notes and gotchas
 
 - The gate service must run with `SERVICE_ROLE=gate` (the container sets it) or it defaults to the facility wallet.
@@ -131,3 +150,10 @@ The policy engine runs a second, independent trust check (Layer 1 plus a trust l
 - `src/credentials/`, `src/templates/`, `src/dids/` - the Paradym credential, template and DID helpers.
 - `robot-agent/` - the headless Credo 0.7.0 holder (its own package) exposing the robot-service.
 - `docker-compose.yml`, `Dockerfile`, `robot-agent/Dockerfile` - the containerised stack.
+
+## Related repositories
+
+- [credential-lifecycle-phase-tests](https://github.com/Stormcatch/credential-lifecycle-phase-tests) - the phase-system test suite (phases 1 to 3c) that exercises this stack and the partners.
+- [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui) - a Next.js demo harness: contracts, the mocked flow, and the live Engine, Bridge and End-to-end tabs.
+- [stormcatch-policy-sdk](https://github.com/Stormcatch/stormcatch-policy-sdk) - the policy engine (Rocco), `@stormcatch/authoriser`.
+- [crt-demo](https://github.com/Stormcatch/crt-demo) - the Certificate Platform (Martin) that issues the birth certificate.
