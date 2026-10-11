@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restart the QR reader on bishop (camera -> decode -> robot /present -> gate /result).
 set -e
-export GATE_URL=${GATE_URL:-http://192.168.178.101:4002}
+export GATE_URL=${GATE_URL:-http://sc-dev-cm5-janus.local:4002}
 pkill -f "qr_present.py" || true
 sleep 1
 setsid nohup python3 "$HOME/qr_present.py" --poll 40 >> "$HOME/pilot-logs/qr_present.log" 2>&1 < /dev/null &

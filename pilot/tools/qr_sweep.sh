@@ -1,14 +1,26 @@
 #!/usr/bin/env bash
 # Run one QR sweep from the laptop. Usage: ./qr_sweep.sh <distance label> [hold seconds]
-# Needs ssh aliases bishop and janus, ~/qr_sweep.py on both boxes (scp pilot/tools/qr_sweep.py there),
-# the janus e-paper inside the bishop camera frame. Pauses the gate display loop and the reader,
-# runs the sweep, prints the table, brings both back.
+# Needs ssh aliases bishop and janus, ~/qr_sweep.py on both boxes (pilot-provision.sh puts it there),
+# the janus e-paper inside the bishop camera frame. Checks that first, then pauses the gate
+# display loop and the reader, runs the sweep, prints the table, brings both back.
+# The quoted ~ below expand on the boxes, not here.
+# shellcheck disable=SC2088
 set -euo pipefail
 DIST=${1:?distance label, e.g. 200cm}
 HOLD=${2:-12}
 STAMP=$(date +%Y%m%d-%H%M)
 OUT=${OUT:-$HOME/work_vault/00_PILOT_V0/sweeps}
 mkdir -p "$OUT"
+
+# One snapshot, one decode of whatever the gate shows now, before anything is paused.
+# A miss leaves the frame in $OUT so the camera can be aimed. SWEEP_FORCE=1 skips this.
+if [ "${SWEEP_FORCE:-}" != 1 ]; then
+  if ! ssh bishop 'python3 ~/qr_sweep.py probe --save /tmp/sweep-probe.jpg'; then
+    scp -q bishop:/tmp/sweep-probe.jpg "$OUT/$STAMP-$DIST-probe.jpg" 2>/dev/null || true
+    echo "no code in the bishop frame. Aim the camera at the janus panel (frame: $OUT/$STAMP-$DIST-probe.jpg) and retry."
+    exit 1
+  fi
+fi
 N=$(python3 -c "import sys; sys.path.insert(0, '$(dirname "$0")'); import qr_sweep; print(len(qr_sweep.VARIANTS))")
 SECS=$(( N * (HOLD + 6) + 20 ))
 

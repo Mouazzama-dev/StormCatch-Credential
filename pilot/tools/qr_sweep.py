@@ -8,6 +8,7 @@ Three modes, one file, so the same variant list is used on both boxes.
   read   (bishop) Fetch snapshot frames for N seconds, decode each with the WeChat detector
                   used by qr_present.py, record every attempt. Stop qr_present.py first.
   table  (laptop) Join the two JSON files and print a markdown table per variant.
+  probe  (bishop) One snapshot, one decode: is the code the gate shows now inside the frame?
 
 The payload has the exact shape of the gate's compact code (two upper-case UUIDs joined
 by "/", 73 chars) so the qrcode segmentation matches the real code. The first eight
@@ -126,17 +127,26 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_read(args: argparse.Namespace) -> int:
+def wechat_detector(models_dir: str):
+    """The detector qr_present.py uses, or None (with a log line) when a model file is missing."""
     import cv2
-    import numpy as np
 
-    models = Path(args.models).expanduser()
+    models = Path(models_dir).expanduser()
     files = [str(models / f) for f in ("detect.prototxt", "detect.caffemodel", "sr.prototxt", "sr.caffemodel")]
     missing = [f for f in files if not os.path.isfile(f)]
     if missing:
         log(f"missing WeChat models: {missing}")
+        return None
+    return cv2.wechat_qrcode_WeChatQRCode(*files)
+
+
+def cmd_read(args: argparse.Namespace) -> int:
+    import cv2
+    import numpy as np
+
+    detector = wechat_detector(args.models)
+    if detector is None:
         return 2
-    detector = cv2.wechat_qrcode_WeChatQRCode(*files)
     attempts = []
     end = time.time() + args.seconds
     shape = None
@@ -165,6 +175,42 @@ def cmd_read(args: argparse.Namespace) -> int:
     Path(args.out).write_text(json.dumps({"frame": shape, "attempts": attempts}, indent=0))
     decoded = sum(1 for a in attempts if a.get("text"))
     log(f"{len(attempts)} frames, {decoded} decoded, frame {shape}, in {args.out}")
+    return 0
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    """One frame, one decode. Exit 0 with the code's place in the frame, 3 when nothing decodes."""
+    import cv2
+    import numpy as np
+
+    detector = wechat_detector(args.models)
+    if detector is None:
+        return 2
+    try:
+        with urllib.request.urlopen(args.snapshot, timeout=5) as resp:
+            data = resp.read()
+    except Exception as e:  # noqa: BLE001
+        log(f"snapshot {args.snapshot}: {e}")
+        return 2
+    if args.save:
+        Path(args.save).write_bytes(data)
+    frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        log("snapshot is not an image")
+        return 2
+    h, w = frame.shape[:2]
+    t0 = time.time()
+    texts, points = detector.detectAndDecode(frame)
+    ms = (time.time() - t0) * 1000
+    hit = next((i for i, x in enumerate(texts) if x), None)
+    if hit is None:
+        log(f"nothing decoded in a {w}x{h} frame ({ms:.0f} ms)" + (f", frame saved to {args.save}" if args.save else ""))
+        return 3
+    xs = [float(p[0]) for p in points[hit]]
+    ys = [float(p[1]) for p in points[hit]]
+    log(f"decoded in {ms:.0f} ms: {texts[hit][:24]}... "
+        f"code spans x {min(xs) / w:.0%}-{max(xs) / w:.0%}, y {min(ys) / h:.0%}-{max(ys) / h:.0%} "
+        f"of {w}x{h}, side {max(max(xs) - min(xs), max(ys) - min(ys)):.0f} px")
     return 0
 
 
@@ -222,6 +268,12 @@ def main() -> int:
     r.add_argument("--models", default=os.environ.get("MODELS_DIR", "~/wechat_qr"))
     r.add_argument("--out", default="sweep-reads.json")
     r.set_defaults(fn=cmd_read)
+    p = sub.add_parser("probe", help="bishop: one snapshot, one decode, is the panel in frame")
+    p.add_argument("--snapshot", default=os.environ.get("SNAPSHOT_URL", "http://127.0.0.1:8000/snapshot.jpg"))
+    p.add_argument("--models", default=os.environ.get("MODELS_DIR", "~/wechat_qr"))
+    p.add_argument("--save", metavar="JPEG", help="keep the frame here, decoded or not")
+    p.set_defaults(fn=cmd_probe)
+
     t = sub.add_parser("table", help="laptop: join schedule and reads")
     t.add_argument("schedule")
     t.add_argument("reads")
