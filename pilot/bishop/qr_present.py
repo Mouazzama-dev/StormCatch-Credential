@@ -62,7 +62,8 @@ COMPACT = re.compile(rf"^({UUID})/({UUID})$")
 
 
 def log(msg: str) -> None:
-    print(time.strftime("%H:%M:%S"), msg, flush=True)
+    now = time.time()
+    print(time.strftime("%H:%M:%S", time.localtime(now)) + f".{int(now * 1000) % 1000:03d}", msg, flush=True)
 
 
 def expand(payload: str) -> tuple[str, str | None]:
@@ -123,7 +124,9 @@ def poll_verdict(request_id: str, seconds: int) -> dict | None:
             code, result = 0, {}
         if code == 200 and result.get("status") != "pending":
             return result
-        time.sleep(1)
+        # 0.3 s, same as the headless runs: the gate answers on loopback and a 1 s sleep
+        # hid up to 0.7 s of the camera-to-verdict figure (hand-held reads of 2026-10-08).
+        time.sleep(0.3)
     return None
 
 
@@ -140,19 +143,21 @@ def present(payload: str, poll_seconds: int, tries: int) -> dict:
             log(f"gate verdict: {json.dumps(early)[:300]}")
             return early
     log(f"present -> {ROBOT_URL}/present (try {tries})")
+    t_post = time.time()
     try:
         status, body = post_json(f"{ROBOT_URL}/present", {"requestUri": uri}, timeout=90)
     except Exception as e:
-        log(f"robot-service unreachable: {e}")
+        log(f"robot-service unreachable after {time.time() - t_post:.2f} s: {e}")
         return {"status": "error", "reason": f"robot-service unreachable: {e}"}
-    log(f"robot-service {status}: {json.dumps(body)[:300]}")
+    log(f"robot-service {status} in {time.time() - t_post:.2f} s: {json.dumps(body)[:300]}")
     if status != 200 or not body.get("ok", True):
         return {"status": "error", "reason": f"robot-service {status}: {body.get('error') or body.get('serverBody') or ''}"[:200]}
     if not GATE_URL or not request_id:
         return {"status": "error", "reason": "no gate to poll"}
+    t_poll = time.time()
     verdict = poll_verdict(request_id, poll_seconds)
     if verdict:
-        log(f"gate verdict: {json.dumps(verdict)[:300]}")
+        log(f"gate verdict after {time.time() - t_poll:.2f} s (total {time.time() - t_post:.2f} s from present): {json.dumps(verdict)[:300]}")
         return verdict
     log("gate verdict: still pending after the poll window")
     return {"status": "error", "reason": "no verdict in the poll window"}
@@ -193,7 +198,7 @@ class Attempts:
         with self.lock:
             if self.busy:
                 return
-            st = self.state.setdefault(payload, {"status": "new", "tries": 0, "next": 0, "reason": ""})
+            st = self.state.setdefault(payload, {"status": "new", "tries": 0, "next": 0, "reason": "", "first_seen": time.time()})
             if st["status"] in ("allowed", "denied", "gave-up"):
                 return
             if time.time() < st["next"]:
@@ -202,9 +207,11 @@ class Attempts:
             self.busy = True
             self.current = payload
             tries = st["tries"]
-        threading.Thread(target=self._run, args=(payload, tries), daemon=True).start()
+            first_seen = st["first_seen"]
+        threading.Thread(target=self._run, args=(payload, tries, first_seen), daemon=True).start()
 
-    def _run(self, payload: str, tries: int) -> None:
+    def _run(self, payload: str, tries: int, first_seen: float) -> None:
+        t_start = time.time()
         try:
             outcome = present(payload, self.poll_seconds, tries)
         except Exception as e:  # last line of defence: the reader must not die
@@ -213,6 +220,9 @@ class Attempts:
         with self.lock:
             st = self.state[payload]
             st["status"] = outcome.get("status", "error")
+            if st["status"] in ("allowed", "denied"):
+                log(f"timing: decode->try {t_start - first_seen:.2f} s, try->verdict {time.time() - t_start:.2f} s, "
+                    f"decode->verdict {time.time() - first_seen:.2f} s (try {tries})")
             st["reason"] = str(outcome.get("reason") or outcome.get("determiningPolicies") or "")[:200]
             if st["status"] == "error":
                 if tries >= len(BACKOFF):

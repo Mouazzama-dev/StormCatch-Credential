@@ -59,6 +59,7 @@ pre{background:#000;border:1px solid #333;padding:8px;height:38vh;overflow:auto;
 <div class="card" id="c-qr"><h3>Last QR decoded</h3><div class="v" id="qr">(none yet)</div></div>
 <div class="card" id="c-robot"><h3>robot-service /present</h3><div class="v" id="robot">(waiting)</div></div>
 <div class="card" id="c-gate"><h3>Gate verdict</h3><div class="v" id="gate">(waiting)</div></div>
+<div class="card" id="c-timing"><h3>Timing (last verdict)</h3><div class="v" id="timing">(no verdict yet)</div></div>
 <pre id="log"></pre>
 </div></main>
 <script>
@@ -69,6 +70,7 @@ async function tick(){
     document.getElementById('qr').textContent=d.decoded||'(none yet)';
     document.getElementById('robot').textContent=d.robot||'(waiting)';
     document.getElementById('gate').textContent=d.verdict||'(waiting)';
+    document.getElementById('timing').textContent=d.timing||'(no verdict yet)';
     const g=document.getElementById('c-gate'); g.className='card '+(d.verdict_class||'');
     const s=d.status||{}; let txt='(no status yet)', cls='';
     if(s.state==='presenting'){ txt='presenting, try '+s.tries+' (waiting for the verdict)'; cls='presenting'; }
@@ -97,7 +99,7 @@ def read_log(max_lines: int = 60) -> dict:
     if os.path.isfile(LOG_FILE):
         with open(LOG_FILE, encoding="utf-8", errors="replace") as f:
             lines = f.read().splitlines()[-max_lines:]
-    decoded = robot = verdict = ""
+    decoded = robot = verdict = timing = ""
     for line in lines:
         if "decoded (" in line:
             decoded = line
@@ -106,6 +108,8 @@ def read_log(max_lines: int = 60) -> dict:
             robot = line
         elif "gate verdict" in line:
             verdict = line
+        elif "timing:" in line:
+            timing = line
     vclass = ""
     if '"allowed"' in verdict:
         vclass = "allowed"
@@ -126,6 +130,7 @@ def read_log(max_lines: int = 60) -> dict:
         "decoded": decoded,
         "robot": robot,
         "verdict": verdict,
+        "timing": timing,
         "verdict_class": vclass,
         "reader_alive": alive,
     }
