@@ -3,7 +3,8 @@
 # Usage: ./bishop-start.sh [stop|status]
 set -u
 export PATH=$HOME/.local/opt/node/bin:$HOME/.local/bin:$PATH
-export GATE_URL=${GATE_URL:-http://192.168.178.101:4002}
+# The gate box by its mDNS name: both boxes resolve .local (nsswitch mdns4_minimal), no fixed IP.
+export GATE_URL=${GATE_URL:-http://sc-dev-cm5-janus.local:4002}
 CC=$HOME/StormCatch-Credential-Core/robot-agent
 LOGS=$HOME/pilot-logs; mkdir -p "$LOGS"
 rotate_logs() { for f in "$LOGS"/*.log; do [ -f "$f" ] && mv -f "$f" "$f.1"; done; }
@@ -24,7 +25,7 @@ stop_all
 rotate_logs
 # Loopback only: robot-service has no auth and every caller (qr_present, dashboard) is local.
 ( cd "$CC" && ROBOT_HOST=127.0.0.1 setsid nohup ./node_modules/.bin/tsx src/robot-service.ts > "$LOGS/robot-service.log" 2>&1 < /dev/null & )
-cd "$HOME"
+cd "$HOME" || exit 1
 setsid nohup python3 "$HOME/cam_stream.py" >> "$LOGS/cam_stream.log" 2>&1 < /dev/null &
 sleep 5
 setsid nohup python3 "$HOME/qr_dashboard.py" >> "$LOGS/qr_dashboard.log" 2>&1 < /dev/null &

@@ -27,7 +27,7 @@ Environment (all optional):
   SNAPSHOT_URL default http://127.0.0.1:8000/snapshot.jpg
   STATUS_FILE  default ~/pilot-logs/reader_status.json
   ROBOT_URL    default http://127.0.0.1:4004
-  GATE_URL     default http://10.10.1.214:4002 (janus on the LAN); empty = skip
+  GATE_URL     default http://sc-dev-cm5-janus.local:4002 (janus by mDNS); empty = skip
   CLIENT_ID    verifier DID for the local link rebuild, used only when the gate's
                /request/{uuid} lookup fails (the gate copy already carries it)
   MODELS_DIR   default ~/wechat_qr
@@ -50,7 +50,7 @@ SNAPSHOT_URL = os.environ.get("SNAPSHOT_URL", "http://127.0.0.1:8000/snapshot.jp
 STATUS_FILE = os.path.expanduser(os.environ.get("STATUS_FILE", "~/pilot-logs/reader_status.json"))
 BACKOFF = (5, 10, 20, 20, 20, 20)  # seconds before try 2, 3, ...; len = max tries
 ROBOT_URL = os.environ.get("ROBOT_URL", "http://127.0.0.1:4004")
-GATE_URL = os.environ.get("GATE_URL", "http://10.10.1.214:4002")
+GATE_URL = os.environ.get("GATE_URL", "http://sc-dev-cm5-janus.local:4002")
 CLIENT_ID = os.environ.get(
     "CLIENT_ID",
     "decentralized_identifier:did:web:metadata.paradym.id:4e9573de-5cb8-4f81-b178-de95ff8cb13f",
