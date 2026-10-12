@@ -6,7 +6,8 @@
 # Comes after FHU's sc-provision on the box (system updates, cloudflared, toolchain,
 # accounts with sc-add-dev, Wi-Fi with sc-add-wifi). This script owns the pilot layer:
 # node 22 and pnpm under ~/.local/opt, the python packages for the role, the WeChat
-# detector models (bishop), the Waveshare e-Paper library (janus), the source trees
+# detector models (bishop), the Waveshare e-Paper library with the SPI1 pin patch and
+# tpm2-tools (both boxes), the source trees
 # shipped from this laptop checkout (committed files only; node_modules and every path
 # the repo's .gitignore names stay on the box), pnpm install, the box scripts, the
 # systemd user units, linger, start, health. Every step prints one line: ok, TODO, or
@@ -16,7 +17,7 @@
 #   --restart  restart a running stack after the sync (default: start it only when down)
 #
 # Secrets never travel: .env and ~/.pilot-* stay on the box. The script lists what is
-# missing and stops before starting services. Hardware (SPI, camera, config.txt) is
+# missing and stops before starting services. Hardware (SPI, TPM, camera, config.txt) is
 # reported, not changed: config.txt is FHU's.
 #
 # Laptop half: ships files with rsync, then runs the on-box half over ssh as
@@ -50,15 +51,15 @@ on_box() {
   else echo "  no passwordless sudo: sudo sc-add-dev $USER \"<key>\" --sudo first"; return 1; fi
   if curl -fsI -m 10 http://deb.debian.org/ >/dev/null; then ok "internet"
   else echo "  no internet: sudo sc-add-wifi first"; return 1; fi
-  local g want_groups=video
-  [ "$box" = janus ] && want_groups="spi gpio"
+  local g want_groups="spi gpio"
+  [ "$box" = bishop ] && want_groups="video spi gpio"
   for g in $want_groups; do
     if id -nG | grep -qw "$g"; then ok "group $g"; else todo "group $g missing (sc-add-dev adds it; log out and in)"; fi
   done
 
   step "apt packages"
   local p pk="git rsync python3-pil python3-qrcode python3-numpy" missing=""
-  [ "$box" = janus ] && pk="$pk python3-spidev python3-gpiozero python3-rpi-lgpio python3-lgpio"
+  pk="$pk python3-spidev python3-gpiozero python3-rpi-lgpio python3-lgpio tpm2-tools"  # e-paper and TPM, both boxes
   [ "$box" = bishop ] && pk="$pk python3-opencv python3-picamera2 rpicam-apps-lite"
   for p in $pk; do
     dpkg -s "$p" 2>/dev/null | grep -q "^Status: install ok installed" || missing="$missing $p"
@@ -73,6 +74,11 @@ on_box() {
     sudo -n apt-get install -y -qq $missing >>"$logs/provision-apt.log" 2>&1
     ok "installed:$missing"
   fi
+  # tpm2-tools creates the tss group; a member runs tpm2_* on /dev/tpmrm0 without sudo.
+  if id -nG | grep -qw tss; then ok "group tss"
+  elif ! getent group tss >/dev/null; then todo "group tss absent until tpm2-tools is installed"
+  elif [ "$mode" = check ]; then todo "group tss: usermod -aG tss $USER, then log out and in"
+  else sudo -n usermod -aG tss "$USER"; ok "group tss added; log out and in for tpm2_* without sudo"; fi
 
   step "node 22 and pnpm under ~/.local/opt/node"
   local want_node=22 want_pnpm=11.28.4 have base tarball b
@@ -134,17 +140,26 @@ e5d36889d8e6ef2f1c1f515f807cec03979320ac81792cd8fb927c31fd658ae3  sr.caffemodel
     fi
   fi
 
-  if [ "$box" = janus ]; then
-    step "Waveshare e-Paper library in ~/e-Paper"
-    if [ -f ~/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epd4in2_V2.py ]; then ok "epd4in2_V2 present"
-    elif [ "$mode" = check ]; then todo "sparse clone of waveshareteam/e-Paper, RaspberryPi_JetsonNano/python only"
-    else
-      rm -rf ~/e-Paper
-      git clone -q --depth 1 --filter=blob:none --sparse https://github.com/waveshareteam/e-Paper.git ~/e-Paper
-      git -C ~/e-Paper sparse-checkout set RaspberryPi_JetsonNano/python
-      ok "e-Paper library cloned ($(du -sh ~/e-Paper | cut -f1))"
-    fi
+  step "Waveshare e-Paper library in ~/e-Paper"
+  if [ -f ~/e-Paper/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epd4in2_V2.py ]; then ok "epd4in2_V2 present"
+  elif [ "$mode" = check ]; then todo "sparse clone of waveshareteam/e-Paper, RaspberryPi_JetsonNano/python only"
+  else
+    rm -rf ~/e-Paper
+    git clone -q --depth 1 --filter=blob:none --sparse https://github.com/waveshareteam/e-Paper.git ~/e-Paper
+    git -C ~/e-Paper sparse-checkout set RaspberryPi_JetsonNano/python
+    ok "e-Paper library cloned ($(du -sh ~/e-Paper | cut -f1))"
   fi
+  # The TPM takes the vendor's DC and BUSY pins (GPIO 25, 24) and SPI0 CE1, so the panel sits
+  # on SPI1 with CS GPIO16, DC GPIO22, BUSY GPIO27. The vendor file has the SPI0 pins;
+  # ~/epdconfig-spi1.patch (pilot/tools, copied with the box files) moves it. A fresh clone
+  # needs it again. Wiring and the reasoning: vault note tpm-letstrust.
+  local epdp=$HOME/epdconfig-spi1.patch
+  if [ ! -d ~/e-Paper/.git ]; then :
+  elif [ ! -f "$epdp" ]; then todo "pin patch $epdp not on the box yet (sync copies it)"
+  elif git -C ~/e-Paper apply --reverse --check "$epdp" 2>/dev/null; then ok "epdconfig.py on the SPI1 pins"
+  elif [ "$mode" = check ]; then todo "epdconfig.py has the vendor SPI0 pins; sync applies $epdp"
+  elif git -C ~/e-Paper apply "$epdp" 2>"$logs/provision-epd.log"; then ok "epdconfig.py patched to the SPI1 pins"
+  else todo "pin patch does not apply, upstream changed epdconfig.py? see $logs/provision-epd.log"; fi
 
   step "sources"
   local d dirs=$HOME/StormCatch-Credential-Core
@@ -187,12 +202,17 @@ e5d36889d8e6ef2f1c1f515f807cec03979320ac81792cd8fb927c31fd658ae3  sr.caffemodel
   fi
 
   step "hardware"
-  local other=sc-dev-cm5-janus
-  if [ "$box" = janus ]; then
-    other=sc-dev-pi5-bishop
-    if grep -qE '^dtparam=spi=on' /boot/firmware/config.txt && [ -e /dev/spidev0.0 ]; then ok "SPI on, /dev/spidev0.0"
-    else todo "SPI off: 'dtparam=spi=on' in /boot/firmware/config.txt (FHU's file), then reboot"; fi
-  else
+  local other=sc-dev-cm5-janus cfg=/boot/firmware/config.txt
+  [ "$box" = janus ] && other=sc-dev-pi5-bishop
+  # Both boxes carry the LetsTrust TPM on SPI0 CE1 and the e-paper on SPI1. The three lines
+  # live in config.txt, which is FHU's, so they are reported, not written.
+  if grep -qE '^dtparam=spi=on' "$cfg" && [ -e /dev/spidev0.0 ]; then ok "SPI on, /dev/spidev0.0"
+  else todo "SPI off: 'dtparam=spi=on' in $cfg (FHU's file), then reboot"; fi
+  if grep -qE '^dtoverlay=tpm-slb9670' "$cfg" && [ -c /dev/tpm0 ]; then ok "TPM: /dev/tpm0"
+  else todo "TPM: 'dtoverlay=tpm-slb9670' under [all] in $cfg (FHU's file), then reboot"; fi
+  if grep -qE '^dtoverlay=spi1-1cs,cs0_pin=16' "$cfg" && [ -c /dev/spidev1.0 ]; then ok "e-paper bus: /dev/spidev1.0, CS GPIO16"
+  else todo "e-paper bus: 'dtoverlay=spi1-1cs,cs0_pin=16' under [all] in $cfg (FHU's file), then reboot"; fi
+  if [ "$box" = bishop ]; then
     if rpicam-hello --list-cameras 2>/dev/null | grep -qE '^[0-9]+ :'; then
       ok "camera: $(rpicam-hello --list-cameras 2>/dev/null | grep -E '^[0-9]+ :' | head -n 1 | cut -c1-40)"
     else todo "no camera detected (ribbon seated? camera_auto_detect=1 in config.txt?)"; fi
@@ -290,8 +310,8 @@ ship() {
 ship "$HERE" StormCatch-Credential-Core
 if [ "$BOX" = janus ]; then ship "$SDK" stormcatch-policy-sdk; fi
 
-# Box scripts, the sweep tool, this script, the user units.
-FILES=("$HERE/pilot/$BOX"/*.sh "$HERE/pilot/$BOX"/*.py "$HERE/pilot/tools/qr_sweep.py" "$0")
+# Box scripts, the sweep tool, the e-paper pin patch, this script, the user units.
+FILES=("$HERE/pilot/$BOX"/*.sh "$HERE/pilot/$BOX"/*.py "$HERE/pilot/tools/qr_sweep.py" "$HERE/pilot/tools/epdconfig-spi1.patch" "$0")
 UNITS=("$HERE/pilot/$BOX"/*.service)
 if [ "$MODE" = check ]; then
   diff=$(rsync -rlcn --itemize-changes "${FILES[@]}" "$BOX:" | grep -E '^[<>]f' || true)

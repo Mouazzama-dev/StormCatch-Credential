@@ -27,12 +27,14 @@ pilot/tools/pilot-provision.sh bishop --restart   # same, and restart a running 
 
 It ships the committed files of this checkout and, for janus, of
 `../stormcatch-policy-sdk`; installs node 22 and pnpm under `~/.local/opt`, the python
-packages for the role, the WeChat models (bishop) and the e-Paper library (janus); runs
+packages for the role, the WeChat models (bishop), the e-Paper library with the SPI1 pin
+patch and `tpm2-tools` with the `tss` group (both boxes); runs
 `pnpm install --frozen-lockfile`; copies the box scripts and the user units; enables
 linger; prints one line per step. `.env` and `~/.pilot-*` never leave the box: the
 script lists what is missing and stops before starting anything. `~/.pilot-version` on
-the box records which commits run there. SPI on janus, the camera on bishop and mDNS to
-the other box are reported, not changed: `config.txt` is FHU's.
+the box records which commits run there. SPI, the TPM overlay and the SPI1 bus of the
+e-paper on both boxes, the camera on bishop and mDNS to the other box are reported, not
+changed: `config.txt` is FHU's.
 
 The boxes find each other by mDNS. bishop reaches the gate at
 `http://sc-dev-cm5-janus.local:4002`; `GATE_URL` overrides it.

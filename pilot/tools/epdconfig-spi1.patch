@@ -1,0 +1,31 @@
+diff --git a/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epdconfig.py b/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epdconfig.py
+index b390252..7e8eb1a 100644
+--- a/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epdconfig.py
++++ b/RaspberryPi_JetsonNano/python/lib/waveshare_epd/epdconfig.py
+@@ -41,12 +41,12 @@ logger = logging.getLogger(__name__)
+ class RaspberryPi:
+     # Pin definition
+     RST_PIN  = 17
+-    DC_PIN   = 25
+-    CS_PIN   = 8
+-    BUSY_PIN = 24
++    DC_PIN   = 22   # was 25: GPIO25 is the TPM PIRQ (pin 15)
++    CS_PIN   = 16   # was 8: documentation only, spidev handles CS
++    BUSY_PIN = 27   # was 24: GPIO24 is the TPM reset (pin 13)
+     PWR_PIN  = 18
+-    MOSI_PIN = 10
+-    SCLK_PIN = 11
++    MOSI_PIN = 20   # was 10: documentation only
++    SCLK_PIN = 21   # was 11: documentation only
+ 
+     def __init__(self):
+         import spidev
+@@ -140,7 +140,7 @@ class RaspberryPi:
+ 
+         else:
+             # SPI device, bus = 0, device = 0
+-            self.SPI.open(0, 0)
++            self.SPI.open(1, 0)     # was (0, 0): /dev/spidev1.0
+             self.SPI.max_speed_hz = 4000000
+             self.SPI.mode = 0b00
+         return 0
