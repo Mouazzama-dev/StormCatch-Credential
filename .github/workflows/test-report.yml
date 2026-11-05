@@ -1,0 +1,73 @@
+# Automated component test reports for credential-core.
+# Regenerates the test reports on every change to a component, so a report is never stale -
+# the "report updates when the component changes" we agreed with Frank.
+#
+# Level 1 (this workflow): the self-contained tests that need nothing external - the credential
+# logic (trust anchoring) and the OpenAPI specs. They run on every push and pull request, and
+# the JUnit reports are uploaded as a downloadable artifact.
+# Level 2 (service contracts) and Level 3 (end-to-end) need the live services and Paradym, and
+# run locally for now - see scripts/test-report.mjs.
+name: Component test reports
+
+# WHEN this runs: on a push to main or on any pull request, but only when something that could
+# change a report changed (the source, the tests, the report script, or this file itself).
+# workflow_dispatch lets you also run it by hand from the Actions tab.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "scripts/test-report.mjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/test-report.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "test/**"
+      - "scripts/test-report.mjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/test-report.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# WHAT it does: one job on a fresh Ubuntu machine.
+jobs:
+  report:
+    name: Self-contained component reports
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The self-contained components. The service-contract and e2e tests are left out here
+      # because CI has no running services or Paradym; they are run locally (test-report.mjs).
+      - name: Generate reports (credentials, openapi)
+        run: node scripts/test-report.mjs credentials openapi
+
+      # Keep the JUnit reports as a downloadable artifact, even if a test failed, so there is
+      # always a report to pick up from the run.
+      - name: Upload the JUnit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: component-test-reports
+          path: reports/*.junit.xml

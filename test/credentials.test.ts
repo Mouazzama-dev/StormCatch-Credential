@@ -4,8 +4,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   BIRTH_CERTIFICATE_VCT,
+  X509_ROOT_PREFIX,
   anchoredBirthFacts,
   birthFacts,
   issuerKey,
@@ -13,6 +17,21 @@ import {
   pickTaskAuth,
   robotUid,
 } from "../src/services/decision/credentials.ts";
+
+// Fixture certificates (certs only, no keys): a self-signed test root and an end-entity leaf
+// it signed, plus a leaf signed by a different root. Generated with openssl to mirror the
+// crt-demo shape (CA:TRUE pathlen 0 root, CA:FALSE digitalSignature leaf).
+const fx = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
+const rootPem = readFileSync(path.join(fx, "birth-root.pem"), "utf8");
+const leafPem = readFileSync(path.join(fx, "birth-leaf.pem"), "utf8");
+const otherLeafPem = readFileSync(path.join(fx, "birth-leaf-other.pem"), "utf8");
+const rootAnchor = `${X509_ROOT_PREFIX}${Buffer.from(rootPem).toString("base64")}`;
+
+// A birth certificate credential issued by a given X.509 leaf.
+const birthSignedBy = (certificate: string) => ({
+  ...birth,
+  issuer: { certificate, commonName: "Robot Birth Certificate EK" },
+});
 
 const TASK_VCT = "https://metadata.paradym.id/types/SvumIWqCOX-StormcatchTaskAuthorization";
 
@@ -103,4 +122,36 @@ test("the robot uid is a URN of model and serial, and absent when either is miss
   assert.equal(robotUid({ serialNumber: "SC-ROBOT-0001" }), undefined);
   assert.equal(robotUid({ model: "SC-Model-X" }), undefined);
   assert.equal(robotUid({}), undefined);
+});
+
+test("a birth cert whose leaf chains to an x509root anchor is anchored, any leaf under that root", () => {
+  const r = anchoredBirthFacts(birthSignedBy(leafPem), [rootAnchor]);
+  assert.equal(r.anchored, true, "a leaf signed by the anchored root is trusted");
+  assert.deepEqual(r.facts, { serialNumber: "SC-ROBOT-0001", model: "SC-Model-X" });
+});
+
+test("a birth cert signed by a different root is not anchored", () => {
+  const r = anchoredBirthFacts(birthSignedBy(otherLeafPem), [rootAnchor]);
+  assert.equal(r.anchored, false, "a leaf from another root does not chain to the anchor");
+  assert.deepEqual(r.facts, {});
+});
+
+test("exact fingerprint and x509root anchors coexist; either form anchors", () => {
+  // The other-root leaf does not chain to rootAnchor, but pinning its exact fingerprint still
+  // anchors it - the two anchor forms live in one list.
+  const fp = issuerKey(birthSignedBy(otherLeafPem))!;
+  assert.equal(anchoredBirthFacts(birthSignedBy(otherLeafPem), [rootAnchor, fp]).anchored, true);
+  // And the root anchor still anchors its own leaf alongside the unrelated pin.
+  assert.equal(anchoredBirthFacts(birthSignedBy(leafPem), [rootAnchor, fp]).anchored, true);
+});
+
+test("a malformed x509root anchor is skipped, not fatal, and does not anchor", () => {
+  assert.equal(anchoredBirthFacts(birthSignedBy(leafPem), [`${X509_ROOT_PREFIX}not-base64-a-cert`]).anchored, false);
+  // A good anchor after a bad one still works: one bad entry must not disable the rest.
+  assert.equal(anchoredBirthFacts(birthSignedBy(leafPem), [`${X509_ROOT_PREFIX}zzzz`, rootAnchor]).anchored, true);
+});
+
+test("a DID-issuer birth cert is never chain-anchored (no certificate to validate)", () => {
+  const didBirth = { ...birth, issuer: "did:web:example" };
+  assert.equal(anchoredBirthFacts(didBirth, [rootAnchor]).anchored, false);
 });

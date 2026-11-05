@@ -7,7 +7,7 @@
 // and `credentials[0]` is whichever the holder put first. So the pick is by `vct`, the type
 // claim Paradym copies into presentedAttributes, never by position.
 
-import { createHash } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 
 export type SessionCredential = {
   isValid?: boolean;
@@ -82,18 +82,61 @@ export function issuerKey(c: SessionCredential | undefined): string | undefined 
   return `sha256:${createHash("sha256").update(der).digest("hex")}`;
 }
 
-// Facts are read only from a credential whose issuer is on the anchor list, because the
-// platform's "verified" binds no issuer: a presentation template without a trusted entity
-// accepts any signer, and a self-signed birth certificate would otherwise choose its own
-// serial and walk past a deny entry on the real one. Anchors are leaf fingerprints or DIDs
-// until the engine validates X.509 chains against the Stormcatch root (planned beside the
-// trust list's X.509 entry kind); an empty list reads nothing.
+// A trust anchor that names a root certificate rather than one signing cert: the base64 of
+// an X.509 root (DER or PEM). It trusts ANY leaf that chains to that root, so a rotated
+// crt-demo signing certificate keeps working without re-pinning. The crt-demo root signs
+// end-entity certs directly (CA:TRUE, pathlen 0), so one issued-by plus one signature check
+// is the whole chain.
+export const X509_ROOT_PREFIX = "x509root:";
+
+// The credential's own signing certificate (the end-entity leaf Paradym reports as the
+// issuer) as a PEM, or undefined when the issuer is a DID or carries no certificate.
+function leafCertPem(c: SessionCredential | undefined): string | undefined {
+  const issuer = c?.issuer;
+  if (!issuer || typeof issuer !== "object") return undefined;
+  const pem = (issuer as { certificate?: unknown }).certificate;
+  return typeof pem === "string" && pem.includes("BEGIN CERTIFICATE") ? pem : undefined;
+}
+
+// True when the credential's leaf certificate is issued by, and validly signed under, one of
+// the `x509root:` anchors, and is itself within its validity window. A malformed leaf or
+// anchor is skipped, never thrown: one bad entry must not disable the rest of the list.
+function chainsToAnchoredRoot(c: SessionCredential | undefined, anchors: readonly string[]): boolean {
+  const pem = leafCertPem(c);
+  if (pem === undefined) return false;
+  let leaf: X509Certificate;
+  try {
+    leaf = new X509Certificate(pem);
+  } catch {
+    return false;
+  }
+  const now = Date.now();
+  if (now < Date.parse(leaf.validFrom) || now > Date.parse(leaf.validTo)) return false;
+  for (const anchor of anchors) {
+    if (!anchor.startsWith(X509_ROOT_PREFIX)) continue;
+    try {
+      const root = new X509Certificate(Buffer.from(anchor.slice(X509_ROOT_PREFIX.length), "base64"));
+      if (leaf.checkIssued(root) && leaf.verify(root.publicKey)) return true;
+    } catch {
+      // Ignore this anchor and try the next one.
+    }
+  }
+  return false;
+}
+
+// Facts are read only from a credential whose issuer is anchored, because the platform's
+// "verified" binds no issuer: a presentation template without a trusted entity accepts any
+// signer, and a self-signed birth certificate would otherwise choose its own serial and walk
+// past a deny entry on the real one. An issuer is anchored two ways, and the list may hold
+// either or both: an exact DID or `sha256:<hex>` leaf fingerprint (the interim pin), or an
+// `x509root:` anchor its leaf chains to. An empty list reads nothing.
 export function anchoredBirthFacts(
   c: SessionCredential | undefined,
   anchors: readonly string[],
 ): { facts: BirthFacts; issuer: string | undefined; anchored: boolean } {
   const issuer = issuerKey(c);
-  const anchored = issuer !== undefined && anchors.includes(issuer);
+  const exact = issuer !== undefined && anchors.includes(issuer);
+  const anchored = exact || chainsToAnchoredRoot(c, anchors);
   return { facts: anchored ? birthFacts(c) : {}, issuer, anchored };
 }
 

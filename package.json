@@ -24,7 +24,8 @@
     "register-webhook": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/register-webhook.ts",
     "did": "SERVICE_ROLE=facility tsx --env-file=.env src/scripts/01-did.ts",
     "gate-demo-headless": "tsx --env-file=.env src/scripts/gate-demo-headless.ts",
-    "docs:check": "tsx src/scripts/check-openapi.ts"
+    "docs:check": "tsx src/scripts/check-openapi.ts",
+    "test:report": "node scripts/test-report.mjs"
   },
   "keywords": [],
   "author": "",
