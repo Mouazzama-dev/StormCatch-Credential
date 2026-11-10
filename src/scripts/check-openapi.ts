@@ -6,12 +6,16 @@ import { facilityOpenapi } from "../services/facility/openapi.ts";
 import { gateOpenapi } from "../services/gate/openapi.ts";
 import { decisionOpenapi } from "../services/decision/openapi.ts";
 import { robotOpenapi } from "../../robot-agent/src/openapi.ts";
+import { pickupOpenapi } from "../services/pickup/openapi.ts";
+import { dropoffOpenapi } from "../services/dropoff/openapi.ts";
 
 const services = [
   { name: "facility", file: "src/services/facility/server.ts", spec: facilityOpenapi },
   { name: "gate", file: "src/services/gate/server.ts", spec: gateOpenapi },
   { name: "decision", file: "src/services/decision/server.ts", spec: decisionOpenapi },
   { name: "robot", file: "robot-agent/src/robot-service.ts", spec: robotOpenapi },
+  { name: "pickup", file: "src/services/pickup/server.ts", spec: pickupOpenapi },
+  { name: "dropoff", file: "src/services/dropoff/server.ts", spec: dropoffOpenapi },
 ];
 
 // /openapi.json and /docs are added by mountDocs, not part of the documented API.

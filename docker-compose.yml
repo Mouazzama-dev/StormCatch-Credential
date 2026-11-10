@@ -35,9 +35,26 @@ services:
     ports:
       - "4003:4003"
 
+  broker:
+    image: eclipse-mosquitto:2
+    command: /mosquitto/config/start.sh
+    environment:
+      PICKUP_MQTT_PASSWORD: ${PICKUP_MQTT_PASSWORD}
+      DROPOFF_MQTT_PASSWORD: ${DROPOFF_MQTT_PASSWORD}
+    volumes:
+      - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./broker/acl:/mosquitto/config/acl.src:ro
+      - ./broker/start.sh:/mosquitto/config/start.sh:ro
+      - broker-data:/mosquitto/data
+    ports:
+      - "1883:1883"
+
   robot:
     build: ./robot-agent
     environment:
       ROBOT_PORT: 4004
     ports:
       - "4004:4004"
+
+volumes:
+  broker-data:

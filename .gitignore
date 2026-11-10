@@ -4,3 +4,6 @@ node_modules/
 reports/
 cloudflared.deb
 .infisical.json
+.payload/
+.next/
+*.tsbuildinfo

@@ -1,0 +1,8 @@
+# Only pickup (the issuer) announces a revoke; only drop-off asks for one. Gates get a read-only line here when they start checking payload tokens.
+user pickup
+topic read stormcatch/payload/revoke-request
+topic readwrite stormcatch/payload/revoked/#
+
+user dropoff
+topic write stormcatch/payload/revoke-request
+topic read stormcatch/payload/revoked/#

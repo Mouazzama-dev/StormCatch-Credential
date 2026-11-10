@@ -14,6 +14,9 @@ The credential backend is four containers, plus the policy engine which runs as 
 | gate | 4002 | Verifier (checkpoint). Starts the presentation request, receives the Paradym webhook, delegates the decision. | `POST /verify`, `GET /result/:id`, `POST /webhook` | `/docs` |
 | decision | 4003 | Adapter. Turns a friendly request into the engine's full AuthorizeBody and forwards it. | `POST /decision` | `/docs` |
 | robot | 4004 | Headless Credo holder. Receives and presents credentials, no phone wallet. | `POST /accept`, `POST /present`, `POST /reset` | `/docs` |
+| pickup | 4005 | Manned interaction point (engine `I-1`). Authorises the robot, issues the payload token, and is the only service that revokes one. | `POST /pickup/check`, `POST /pickup` | `/docs` |
+| dropoff | 4006 | Manned interaction point (engine `I-2`). Verifies the payload token and has pickup revoke it over MQTT. | `POST /dropoff/check`, `POST /dropoff` | `/docs` |
+| broker | 1883 | Mosquitto. Carries payload revoke requests and the retained revoked list. | MQTT | - |
 | policy engine | 5174 | RDI's `@stormcatch/authoriser`. Runs the staged pipeline (Layer 1, trust, deny, Cedar). Own repo. | `POST /api/authorize`, `/api/docs` | `/api/docs` |
 
 Every service serves its OpenAPI document at `/openapi.json` and Swagger UI at `/docs`. `pnpm docs:check` fails if any service's routes drift from its spec.
@@ -110,6 +113,10 @@ Expected: verify at G-1 is `allowed`, then after revoke it is `denied`.
 
 Individual services can also be run on the host without Docker: `pnpm facility`, `pnpm gate`, `pnpm decision`, and `pnpm robot` (from `robot-agent/`).
 
+## Interaction points (pickup and drop-off)
+
+Pickup issues the payload as an ES256 JWT; drop-off verifies it and asks pickup to revoke it over MQTT, answering "received" only once pickup confirms. The flow, the decisions and assumptions behind it, and the settings are in [docs/interaction-points.md](docs/interaction-points.md).
+
 ## Trust model
 
 Two Paradym wallets separate the actors. The facility wallet is the issuer; the gate wallet is the verifier. The issuer identifier is a `did:web` (`did:web:metadata.paradym.id:...`), pinned on the verifier as a trusted entity that the gate's presentation template references, so the verifier only accepts credentials from that issuer.
@@ -127,7 +134,11 @@ The policy engine runs a second, independent trust check (Layer 1 plus a trust l
 
 ## Repository layout
 
-- `src/services/` - the facility, gate and decision HTTP services, each with its `openapi.ts` spec.
+- `src/services/` - the facility, gate, decision, pickup and dropoff HTTP services, each with its `openapi.ts` spec.
+- `src/payload/` - the payload token (`PayloadBackend` interface, JWT backend, blacklist) and MQTT revocation by proxy.
+- `broker/` - the Mosquitto config, ACL and start script for the revocation broker.
+- `docs/` - design notes, including the interaction-point decisions.
+- `ui/` - the pickup and drop-off desk screens (Next.js, its own package).
 - `src/scripts/` - setup scripts (templates, trust, webhook) and orchestrators (`gate-demo`, `gate-demo-headless`).
 - `src/credentials/`, `src/templates/`, `src/dids/` - the Paradym credential, template and DID helpers.
 - `robot-agent/` - the headless Credo 0.7.0 holder (its own package) exposing the robot-service.

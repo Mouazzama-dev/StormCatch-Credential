@@ -7,12 +7,16 @@ import { facilityOpenapi } from "../src/services/facility/openapi.ts";
 import { gateOpenapi } from "../src/services/gate/openapi.ts";
 import { decisionOpenapi } from "../src/services/decision/openapi.ts";
 import { robotOpenapi } from "../robot-agent/src/openapi.ts";
+import { pickupOpenapi } from "../src/services/pickup/openapi.ts";
+import { dropoffOpenapi } from "../src/services/dropoff/openapi.ts";
 
 const specs: Record<string, { spec: any; expect: string[] }> = {
   facility: { spec: facilityOpenapi, expect: ["GET /health", "POST /issue", "GET /issuance/{id}", "POST /revoke"] },
   gate: { spec: gateOpenapi, expect: ["GET /health", "POST /verify", "POST /webhook", "GET /result/{id}"] },
   decision: { spec: decisionOpenapi, expect: ["GET /health", "POST /decision"] },
   robot: { spec: robotOpenapi, expect: ["GET /health", "POST /reset", "POST /accept", "POST /present"] },
+  pickup: { spec: pickupOpenapi, expect: ["GET /health", "POST /pickup/check", "POST /pickup"] },
+  dropoff: { spec: dropoffOpenapi, expect: ["GET /health", "POST /dropoff/check", "POST /dropoff"] },
 };
 
 for (const [name, { spec, expect }] of Object.entries(specs)) {

@@ -7,8 +7,8 @@
     "test": "node --import tsx --test test/*.test.ts",
     "template": "tsx --env-file=.env src/scripts/02-template.ts",
     "issue": "tsx --env-file=.env src/scripts/03-issue.ts",
-    "verify": "tsx --env-file=.env src/scripts/04b-verify.ts",    
-    "revoke": "tsx --env-file=.env src/scripts/05-revoke.ts",    
+    "verify": "tsx --env-file=.env src/scripts/04b-verify.ts",
+    "revoke": "tsx --env-file=.env src/scripts/05-revoke.ts",
     "webhook": "tsx --env-file=.env src/scripts/webhook-test.ts",
     "presentation-template": "tsx --env-file=.env src/scripts/04a-presentation-template.ts",
     "demo": "tsx --env-file=.env src/scripts/run-all.ts",
@@ -18,6 +18,8 @@
     "decision": "tsx --env-file=.env src/services/decision/server.ts",
     "facility": "SERVICE_ROLE=facility tsx --env-file=.env src/services/facility/server.ts",
     "gate": "SERVICE_ROLE=gate tsx --env-file=.env src/services/gate/server.ts",
+    "pickup": "tsx --env-file=.env src/services/pickup/server.ts",
+    "dropoff": "tsx --env-file=.env src/services/dropoff/server.ts",
     "task-template": "SERVICE_ROLE=facility tsx --env-file=.env src/scripts/task-template.ts",
     "task-setup": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/task-setup.ts",
     "trust-setup": "SERVICE_ROLE=gate tsx --env-file=.env src/scripts/trust-setup.ts",
@@ -47,6 +49,8 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "jose": "^6.2.16",
+    "mqtt": "^5.16.1",
     "swagger-ui-express": "^5.0.1"
   }
 }

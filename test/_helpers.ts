@@ -4,6 +4,8 @@ export const BASE = {
   gate: process.env.GATE_URL ?? "http://localhost:4002",
   decision: process.env.DECISION_URL ?? "http://localhost:4003",
   robot: process.env.ROBOT_URL ?? "http://localhost:4004",
+  pickup: process.env.PICKUP_URL ?? "http://localhost:4005",
+  dropoff: process.env.DROPOFF_URL ?? "http://localhost:4006",
 };
 
 // Is a service reachable? Used to skip integration tests gracefully when the stack is down.
