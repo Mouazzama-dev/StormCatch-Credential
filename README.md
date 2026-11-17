@@ -138,7 +138,7 @@ The policy engine runs a second, independent trust check (Layer 1 plus a trust l
 - `src/payload/` - the payload token (`PayloadBackend` interface, JWT backend, blacklist) and MQTT revocation by proxy.
 - `broker/` - the Mosquitto config, ACL and start script for the revocation broker.
 - `docs/` - design notes, including the interaction-point decisions.
-- `ui/` - the pickup and drop-off desk screens (Next.js, its own package).
+- The pickup and drop-off desk screens live in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui), next to the phase test pages.
 - `src/scripts/` - setup scripts (templates, trust, webhook) and orchestrators (`gate-demo`, `gate-demo-headless`).
 - `src/credentials/`, `src/templates/`, `src/dids/` - the Paradym credential, template and DID helpers.
 - `robot-agent/` - the headless Credo 0.7.0 holder (its own package) exposing the robot-service.

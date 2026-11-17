@@ -9,7 +9,7 @@ Two plans for what comes after the first cut described in [interaction-points.md
 | Device | Role | Status |
 |---|---|---|
 | Central server (always-on Raspberry Pi) | MQTT broker; possibly the engine and decision-service | Ordered (Frank, 2026-11-13). Until it arrives, the developer's own machine is the central server. |
-| Desk laptop(s) | pickup and drop-off services and the desk screens (`ui/`); QR by webcam or keyboard-style scanner | Any laptop on the test network |
+| Desk laptop(s) | pickup and drop-off services and the desk screens (credential-lifecycle-ui); QR by webcam or keyboard-style scanner | Any laptop on the test network |
 | janus (`sc-dev-cm5-janus`) | engine :5175, decision-service :4003, gate :4002 | Decision and engine on loopback only |
 | bishop (`sc-dev-pi5-bishop`) | the robot: robot-service :4004, camera, QR reader | Available |
 
@@ -82,9 +82,9 @@ Both describe the same sequence: sign in, identify the robot by its QR, authoris
 | Receipt checkmark revokes | `POST /dropoff`, revoke by proxy over MQTT; the retained revoked list is Martin's "shared database" |
 | Refusal shown to the pharmacy | Not built (pickup could listen for a refusal topic) |
 
-### Built: first version (`ui/`)
+### Built: first version (credential-lifecycle-ui)
 
-The two screens below exist as a first version in [`ui/`](../ui/README.md) (Next.js, matching the credential-lifecycle demo UI), on the two check endpoints and the contents claim. Robot id is typed instead of scanned, the token is handed between desks through the browser instead of the robot, and there is no sign-in yet.
+The two screens below exist as a first version in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui) (pages Pickup and Drop-off), next to the phase test pages, on the two check endpoints and the contents claim. The robot id is typed or scanned with a keyboard-style scanner, the token is handed between desks through the browser instead of the robot, and there is no sign-in yet.
 
 ### How I see it
 

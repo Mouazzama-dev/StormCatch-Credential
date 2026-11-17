@@ -1,3 +1,0 @@
-# ui is its own workspace, independent of the parent repo (same as robot-agent)
-
-strictDepBuilds: false

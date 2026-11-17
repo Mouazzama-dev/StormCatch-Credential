@@ -9,7 +9,7 @@ The pilot route is pickup (manned) -> transit gates (unmanned) -> drop-off (mann
 | Pickup (pharmacist) | pickup, port 4005 | `I-1` pharmacy pickup counter | `POST /pickup/check` answers whether the robot may collect; `POST /pickup` issues the payload token with the medication list. Pickup is the only service that revokes a payload. |
 | Drop-off (doctor) | dropoff, port 4006 | `I-2` ward medicine handover (`I-3` in the clean room) | `POST /dropoff/check` shows what the robot carries; `POST /dropoff` asks pickup to revoke the token and answers "received" once pickup confirms. |
 
-The desk screens for both points are in [`ui/`](../ui/README.md).
+The desk screens for both points are in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui) (pages Pickup and Drop-off), next to the phase test pages.
 
 ## Flow
 
@@ -50,7 +50,7 @@ Choices we made so the pilot could move. Each says why, and what would change it
 6. **Who may publish is enforced twice.** The broker refuses anonymous clients; each service has its own login, and the ACL (`broker/acl`) lets only drop-off publish revoke requests and only pickup publish revoke announcements. On top of that, a revoke request carries the token itself, and pickup verifies the signature and the robot before revoking, so a client with broker access but without a genuine token cannot revoke anyone's payload. Not done yet: TLS on the broker connection.
 7. **The broker runs on a central server.** Agreed in the team meeting of 2026-11-10: the pilot gets an always-on Raspberry Pi as its central server, and the broker lives there. Until that Pi is delivered, the developer's own machine is the central server (Frank, 2026-11-13). Every service finds the broker through `MQTT_URL`, so moving it to the Pi is a configuration change, not a code change (assumption 6).
 8. **The points use the engine's own topology.** Pickup is `I-1` and requires the task action `sc:medicine_pickup`; drop-off is `I-2`, or `I-3` for the clean-room route (`DROPOFF_POINT_ID=I-3`).
-9. **The desks are laptops, not Raspberry Pis.** Agreed in the team meeting of 2026-11-10: the person at pickup and at drop-off works on a laptop, which reads the robot's QR code with its webcam or with a barcode scanner that types like a keyboard (common in hospitals). No extra device per desk, so less to manage and keep updated. The desk screens are a web app (`ui/`), so a tablet works too.
+9. **The desks are laptops, not Raspberry Pis.** Agreed in the team meeting of 2026-11-10: the person at pickup and at drop-off works on a laptop, which reads the robot's QR code with its webcam or with a barcode scanner that types like a keyboard (common in hospitals). No extra device per desk, so less to manage and keep updated. The desk screens are a web app (in credential-lifecycle-ui), so a tablet works too.
 10. **Onboarding stays in Martin's app; everything after it is here.** Agreed in the team meeting of 2026-11-10: onboarding the hospital and the robot (KYC, certificates) stays in Martin's certificate platform. The continuation, meaning tasks, the policy engine and the MQTT revocation, belongs to this work, so the unique parts of Martin's demo after onboarding move here.
 
 ## Assumptions
