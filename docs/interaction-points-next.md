@@ -110,7 +110,7 @@ One small web app, in Martin's stack (Nuxt with the crt-demo design system), so 
 ### Decided in the team meeting (2026-11-10)
 
 - The desks are laptops. The robot's QR code is read with the webcam or with a barcode scanner that types like a keyboard; the robot id field takes either. No Raspberry Pi per desk.
-- Onboarding (hospital, KYC, robot certificates) stays in Martin's app. Tasks, the policy engine and the MQTT revocation are this work, so the parts of Martin's demo after onboarding move here: creating a task (robot, from, to, medication), the activity log, and the gate's check of the task token.
+- Onboarding (hospital, KYC, robot certificates) stays in Martin's app. Tasks, the policy engine and the MQTT revocation are this work, so the parts of Martin's demo after onboarding move here: creating a task (robot, from, to, medication) and the activity log are built (decisions 15 and 16 in [interaction-points.md](./interaction-points.md)); the gate's check of the task token is still to do.
 - Terminology (Frank): every point a robot interacts with is an interaction point; a gate is an interaction point without a person, a "dumb" one.
 - Not for the pilot: the simplified screens for non-technical users, Martin's deep links, and the extra security levels (counters, online-only). One app or separate modules is for the team to decide after the pilot.
 

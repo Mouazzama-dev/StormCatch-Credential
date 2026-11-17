@@ -38,3 +38,15 @@ export async function jget(url: string) {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// A fresh robot id per test, so the one-planned-task-per-robot rule never couples tests.
+export const testRobot = () => `urn:stormcatch:robot:SC-M1:TEST-${Math.random().toString(36).slice(2, 10)}`;
+
+// Plans a task at the pickup desk and has it issued, the way the desk does. Returns why not when a service is down or refuses.
+export async function plannedAndIssued(robotId: string, to: string, items: unknown[]): Promise<{ ok: true; taskId: string; token: string; jti: string } | { ok: false; why: string }> {
+  const planned = await jpost(`${BASE.pickup}/pickup/tasks`, { robotId, to, items });
+  if (planned.status !== 201) return { ok: false, why: `plan ${planned.status} ${planned.json?.reason ?? ""}` };
+  const issued = await jpost(`${BASE.pickup}/pickup`, { robotId, taskId: planned.json.task.id });
+  if (issued.status !== 200) return { ok: false, why: `issue ${issued.status} ${issued.json?.reason ?? issued.json?.decision ?? ""}` };
+  return { ok: true, taskId: planned.json.task.id, token: issued.json.token, jti: issued.json.jti };
+}

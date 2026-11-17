@@ -6,6 +6,7 @@ import { pointUrn } from "../../payload/points.ts";
 import { MqttBlacklist, connectBroker } from "../../payload/revocation.ts";
 import { mountDocs } from "../_docs.ts";
 import { authorisePoint } from "../_authorise.ts";
+import { report } from "../_activity.ts";
 import { dropoffOpenapi } from "./openapi.ts";
 
 // dropoff-service: the manned end of a delivery (doctor). Checks the task token the robot carries (issued by the central server, addressed to this point, ending here), authorises the robot, then has the issuer revoke the token over MQTT so the payload cannot be handed over twice. "received" is answered only once the central server confirms the revoke. The token is checked before the engine is asked: it is local and cheap, and a forged or spent token needs no policy decision.
@@ -69,10 +70,27 @@ function readBody(req: Request, res: Response): { robotId: string; token: string
 }
 
 // Read-only: lets the desk show what the robot carries before anyone confirms receipt. Nothing is revoked.
+// Every check, passed or refused, goes to the central server's activity log; the task id is read from the token when it got that far.
+function reportCheck(event: string, robotId: string, token: string, result: Inspection): void {
+  const taskId = result.ok ? result.claims.task.id : taskIdOf(token);
+  const detail = result.ok ? "valid" : String(result.body.reason ?? result.body.error ?? result.status);
+  report({ event, robotId, taskId, point: POINT_ID, outcome: result.ok ? "ok" : "refused", detail });
+}
+
+// The task id of a token that failed a check, read without trusting it, for the log only.
+function taskIdOf(token: string): string | undefined {
+  try {
+    return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).task?.id;
+  } catch {
+    return undefined;
+  }
+}
+
 app.post("/dropoff/check", async (req: Request, res: Response) => {
   const body = readBody(req, res);
   if (!body) return;
   const result = await inspect(body.robotId, body.token);
+  reportCheck("dropoff.check", body.robotId, body.token, result);
   if (!result.ok) {
     res.status(result.status).json(result.body);
     return;
@@ -84,6 +102,7 @@ app.post("/dropoff", async (req: Request, res: Response) => {
   const body = readBody(req, res);
   if (!body) return;
   const result = await inspect(body.robotId, body.token);
+  if (!result.ok) reportCheck("dropoff.receive", body.robotId, body.token, result);
   if (!result.ok) {
     res.status(result.status).json(result.body);
     return;
@@ -95,6 +114,7 @@ app.post("/dropoff", async (req: Request, res: Response) => {
   } catch (err) {
     // Not received: the token is still live, so the same drop-off can simply be retried.
     console.warn("[dropoff] revoke not confirmed:", (err as Error).message);
+    report({ event: "dropoff.receive", robotId: body.robotId, taskId: claims.task.id, point: POINT_ID, outcome: "refused", detail: "revoke-unconfirmed" });
     res.status(504).json({ error: "the central server did not confirm the revoke, retry the drop-off", reason: "revoke-unconfirmed" });
     return;
   }

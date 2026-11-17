@@ -14,8 +14,8 @@ The credential backend is four containers, plus the policy engine which runs as 
 | gate | 4002 | Verifier (checkpoint). Starts the presentation request, receives the Paradym webhook, delegates the decision. | `POST /verify`, `GET /result/:id`, `POST /webhook` | `/docs` |
 | decision | 4003 | Adapter. Turns a friendly request into the engine's full AuthorizeBody and forwards it. | `POST /decision` | `/docs` |
 | robot | 4004 | Headless Credo holder. Receives and presents credentials, no phone wallet. | `POST /accept`, `POST /present`, `POST /reset` | `/docs` |
-| pickup | 4005 | Manned interaction point (engine `I-1`). Authorises the robot and, on "Loaded", asks the central server for the task token. | `POST /pickup/check`, `POST /pickup` | `/docs` |
-| central | 4007 | The issuer of task tokens (Martin's task JWT format). Mints on request from the pickup desk and revokes over MQTT. | `POST /tasks` | `/docs` |
+| pickup | 4005 | Manned interaction point (engine `I-1`). Plans tasks, checks the robot and, on "Loaded", has the central server issue the token for its planned task. | `POST /pickup/tasks`, `POST /pickup/check`, `POST /pickup` | `/docs` |
+| central | 4007 | The issuer of task tokens (Martin's task JWT format) and the record of tasks and activity. Issues on request from the pickup desk and revokes over MQTT. | `POST /tasks`, `POST /tasks/:id/issue`, `GET /tasks`, `GET /activity` | `/docs` |
 | dropoff | 4006 | Manned interaction point (engine `I-2`). Verifies the task token and has the central server revoke it over MQTT. | `POST /dropoff/check`, `POST /dropoff` | `/docs` |
 | broker | 1883 | Mosquitto. Carries payload revoke requests and the retained revoked list. | MQTT | - |
 | policy engine | 5174 | RDI's `@stormcatch/authoriser`. Runs the staged pipeline (Layer 1, trust, deny, Cedar). Own repo. | `POST /api/authorize`, `/api/docs` | `/api/docs` |

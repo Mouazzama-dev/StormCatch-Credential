@@ -138,3 +138,41 @@ test("blacklist: add is idempotent and has reports membership", async () => {
   assert.equal(await bl.has("j1"), true);
   assert.equal(await bl.has("j2"), false);
 });
+
+test("tasks: the store lists newest first, filters by robot and status, and updates in place", async () => {
+  const { TaskStore } = await import("../src/payload/tasks.ts");
+  const store = new TaskStore(tmpFile());
+  const rec = (id: string, robotId: string, createdAt: string) => ({ robotId, status: "planned" as const, task: { ...task(), id }, createdAt, updatedAt: createdAt });
+  store.put(rec("t1", "r1", "2026-11-17T10:00:00Z"));
+  store.put(rec("t2", "r2", "2026-11-17T11:00:00Z"));
+  assert.deepEqual(store.list().map((r) => r.task.id), ["t2", "t1"]);
+  assert.deepEqual(store.list({ robotId: "r1" }).map((r) => r.task.id), ["t1"]);
+  store.update("t1", (r) => {
+    r.status = "issued";
+    r.jti = "j1";
+  });
+  assert.equal(store.byJti("j1")?.task.id, "t1");
+  assert.deepEqual(store.list({ status: "planned" }).map((r) => r.task.id), ["t2"]);
+  assert.equal(store.update("nope", () => {}), undefined);
+});
+
+test("tasks: the activity log is newest first and filters by task", async () => {
+  const { ActivityLog } = await import("../src/payload/tasks.ts");
+  const log = new ActivityLog(tmpFile());
+  log.add({ event: "task.planned", taskId: "t1" });
+  log.add({ event: "task.planned", taskId: "t2" });
+  log.add({ event: "task.issued", taskId: "t1" });
+  assert.deepEqual(log.list().map((e) => e.event + ":" + e.taskId), ["task.issued:t1", "task.planned:t2", "task.planned:t1"]);
+  assert.deepEqual(log.list({ taskId: "t1" }).map((e) => e.event), ["task.issued", "task.planned"]);
+  assert.equal(log.list({ limit: 1 }).length, 1);
+});
+
+test("tasks: items are validated as the desks send them", async () => {
+  const { readItems } = await import("../src/payload/tasks.ts");
+  assert.deepEqual(readItems([{ name: " Paracetamol ", quantity: 2, code: "P-1" }]), [{ code: "P-1", name: "Paracetamol", quantity: 2 }]);
+  assert.equal(readItems([]), null);
+  assert.equal(readItems([{ name: "x", quantity: 0 }]), null);
+  assert.equal(readItems([{ name: "x", quantity: 1.5 }]), null);
+  assert.equal(readItems([{ name: "", quantity: 1 }]), null);
+  assert.equal(readItems("Paracetamol"), null);
+});

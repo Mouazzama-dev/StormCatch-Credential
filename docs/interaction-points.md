@@ -6,8 +6,8 @@ The pilot route is pickup (manned) -> transit gates (unmanned) -> drop-off (mann
 
 | Point | Service | Engine point | Does |
 |---|---|---|---|
-| Pickup (pharmacist) | pickup, port 4005 | `I-1` pharmacy pickup counter | `POST /pickup/check` answers whether the robot may collect; `POST /pickup`, on "Loaded", authorises the robot and asks the central server for the task token. Holds no signing key. |
-| Central server | central, port 4007 | - | The issuer. `POST /tasks` mints the task token (called by the pickup desk with the issuer token); it keeps the blacklist and revokes over MQTT. Runs next to the broker. |
+| Pickup (pharmacist) | pickup, port 4005 | `I-1` pharmacy pickup counter | `POST /pickup/tasks` plans a task (the pharmacy summons a robot); `POST /pickup/check` answers whether the robot may collect and which planned task it is here for; `POST /pickup`, on "Loaded", has the central server issue the token for that task. Holds no signing key. |
+| Central server | central, port 4007 | - | The issuer and the record. Keeps the tasks (planned, issued, received, cancelled) and the activity log, issues a planned task's token when the pickup desk asks (issuer token), keeps the blacklist and revokes over MQTT. Runs next to the broker. |
 | Drop-off (doctor) | dropoff, port 4006 | `I-2` ward medicine handover (`I-3` in the clean room) | `POST /dropoff/check` shows what the robot carries; `POST /dropoff` asks the central server to revoke the token and answers "received" once it confirms. |
 
 The desk screens for both points are in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui) (pages Pickup and Drop-off), next to the phase test pages.
@@ -55,10 +55,15 @@ sequenceDiagram
     participant D as Drop-off desk
     participant E as decision-service / engine
 
+    P->>C: POST /tasks {robotId, from I-1, to I-2, items} + issuer token
+    C-->>P: task planned (the robot is summoned)
+    Note over P: the robot arrives at the counter
     P->>E: authorise at I-1 (sc:medicine_pickup)
     E-->>P: permit
-    Note over P: pharmacist loads, presses "Loaded"
-    P->>C: POST /tasks {robotId, from I-1, to I-2, items} + issuer token
+    P->>C: which task is this robot here for?
+    C-->>P: the planned task
+    Note over P: pharmacist loads, adjusts items, presses "Loaded"
+    P->>C: POST /tasks/{id}/issue {robotId, items} + issuer token
     C-->>P: {token, jti, task}  (ES256 task JWT)
     Note over P,D: the robot carries the token through the transit gates
     D->>D: verify signature, issuer, time, not revoked, aud has I-2, task ends at I-2, sub == robotId
@@ -72,6 +77,8 @@ sequenceDiagram
     B->>D: revoked/<jti>
     D-->>D: 200 {status: received}
 ```
+
+Every step lands in the central server's activity log: the central server records planning, issuing, receipt and a refused revoke itself, and both desks report each check, passed or refused, with the reason.
 
 ## Decisions
 
@@ -89,8 +96,10 @@ Choices we made so the pilot could move. Each says why, and what would change it
 10. **Onboarding stays in Martin's app; everything after it is here.** Agreed in the team meeting of 2026-11-10: onboarding the hospital and the robot (KYC, certificates) stays in Martin's certificate platform. The continuation, meaning tasks, the policy engine and the MQTT revocation, belongs to this work, so the unique parts of Martin's demo after onboarding move here.
 11. **The token is Martin's task JWT.** Agreed 2026-11-17 (see "The task token" above): `iss`, `sub`, `aud`, `jti`, `iat`, `nbf`, `exp`, `cnf` and the `task` object with structured items, so his demo and this work read the same token. `cnf.x5t#S256` is carried when the robot's PIC thumbprint is known (`cnfThumbprint` on `POST /tasks`); the desks do not read the robot's certificate yet (assumption 5).
 12. **The token names points by the engine's ids.** Agreed 2026-11-17: `aud` and `task.gates` use `I-1`, `G-1` and so on, so the token and the policy engine talk about the same places. `aud` lists every point on the procedure's route as `urn:stormcatch:point:<id>`; drop-off refuses a token that does not name it (`wrong-point`) and a task that ends at another point. Martin's demo names are mapped (table above).
-13. **The pickup desk proves itself to the central server with a shared issuer token.** Only the central server can mint, but anyone who can reach it could ask, so `POST /tasks` requires `Authorization: Bearer <ISSUER_TOKEN>`, which only the pickup desk holds. On one dev machine a token is generated into `.payload/` and shared, like the dev keypair. Changes when: staff sign-in exists; then the signed-in pharmacist's session can replace the shared secret.
+13. **The pickup desk proves itself to the central server with a shared issuer token.** Only the central server can mint, but anyone who can reach it could ask, so planning and issuing (`POST /tasks`, `POST /tasks/{id}/issue`) require `Authorization: Bearer <ISSUER_TOKEN>`, which only the pickup desk holds. On one dev machine a token is generated into `.payload/` and shared, like the dev keypair. Changes when: staff sign-in exists; then the signed-in pharmacist's session can replace the shared secret.
 14. **A detour revokes the parent task.** Agreed 2026-11-17, not built yet (`parentTaskId` travels as `null`). When pharmacy A sends the robot to pharmacy B first, the central server issues the detour task with `parentTaskId` set and revokes the parent at the same time. Left valid, the parent would mean two live tokens for one robot and one load: the robot could skip the detour and present the parent at the ward, a gate could accept either, each would have to be revoked separately if the robot is compromised, and the activity log could not say which task the robot was on. The cost of revoking: if the detour is cancelled, the central server issues a fresh task for the remaining route instead of reviving the old one.
+15. **Tasks are planned ahead.** Agreed 2026-11-17, as in Martin's demo and procedure A ("the pharmacy employee summons the robot"): a task (robot, destination, items) is planned first and stored on the central server; when the robot reaches the counter, "Check robot" finds its planned task, the pharmacist confirms or adjusts the items, and "Loaded" issues the token for that task. A robot has at most one planned task at a time, so the desk never has to guess which one it is here for; a planned task can be cancelled, an issued one ends at receipt.
+16. **The central server keeps an activity log per task.** Agreed 2026-11-17. One line per event in `.payload/activity.jsonl`: planned, issued, received and refused revokes from the central server itself; every pickup and drop-off check, passed or refused with its reason, reported by the desks. The desks report with their own shared secret, `DESK_TOKEN`, separate from the issuer token so drop-off can report without being able to mint, and fire and forget: a desk never waits for the log, and a central server that is down only costs the log entry. Reading tasks and activity is open on the network, like the other services (assumption 4).
 
 ## Assumptions
 
@@ -103,7 +112,8 @@ What the decisions take to be true without having checked it, and the limits we 
 5. **The robot id at the points is the robot id as given.** The engine authorises the point and the errand; the robot id is bound to the payload only through the token's `sub`, and `cnf` (the PIC thumbprint) is only carried once the desks can read the robot's certificate. The decision-service reads identity from a presented birth certificate, and the manned points do not receive one yet. Person sign-in (pharmacist, doctor) is Martin's onboarding platform and out of scope here.
 6. **The central server Pi is ordered but not delivered.** Until it arrives the broker and the issuer run on the developer's own machine, which the pilot boxes cannot reach, so tests on the boxes wait for the Pi (decision 7).
 7. **Stopping reuse with the blacklist is enough for the pilot.** At the handover the engine checks payload issuer and expiry from the decision-service's fixed baseline, not from the token. Reuse is stopped by the blacklist, not by the engine. Changes when: the token's claims are passed into the engine request.
-8. **The pilot routes are the two procedures.** The central server knows the routes `I-1 -> I-2` and `I-1 -> I-3` (`src/payload/points.ts`); a task between any other points is refused (`no-route`). Changes when: the facility defines tasks of its own (Martin's task creation).
+8. **The pilot routes are the two procedures.** The central server knows the routes `I-1 -> I-2` and `I-1 -> I-3` (`src/payload/points.ts`); a task between any other points is refused (`no-route`). Changes when: the facility defines routes of its own.
+9. **The files are enough for the pilot.** Tasks and activity are JSON files on the central server, read whole on every request. Changes when: the number of tasks or events makes that slow; then a database behind the same `TaskStore` and `ActivityLog` calls.
 
 ## Running it locally
 
@@ -128,12 +138,13 @@ node --import tsx --test test/central.test.ts test/pickup.test.ts test/dropoff.t
 |---|---|---|
 | `MQTT_URL` | `mqtt://localhost:1883` | central, dropoff |
 | `CENTRAL_MQTT_PASSWORD`, `DROPOFF_MQTT_PASSWORD` | none (required) | broker, central, dropoff |
-| `CENTRAL_URL` | `http://localhost:4007` | pickup |
+| `CENTRAL_URL` | `http://localhost:4007` | pickup, dropoff |
 | `ISSUER_TOKEN` | dev token in `.payload/dev-issuer-token` | central, pickup |
+| `DESK_TOKEN` | dev token in `.payload/dev-desk-token` | central, pickup, dropoff (reporting events) |
+| `TASKS_FILE`, `ACTIVITY_FILE` | `.payload/tasks.json`, `.payload/activity.jsonl` | central |
 | `ISSUER_ID` | `urn:stormcatch:central` | central, dropoff |
 | `REVOKE_TIMEOUT_MS` | `5000` | dropoff |
 | `PICKUP_POINT_ID`, `DROPOFF_POINT_ID` | `I-1`, `I-2` | pickup, dropoff |
-| `PICKUP_DEFAULT_TO` | `I-2` | pickup (destination when the desk names none) |
 | `POINT_AUTH_ACTION`, `POINT_AUTH_SCOPE` | `sc:medicine_pickup`, none | pickup, dropoff |
 | `PAYLOAD_PRIVATE_KEY`, `PAYLOAD_PUBLIC_KEY` | dev keypair in `.payload/dev-keys.json` | central (both), dropoff (public) |
 | `PAYLOAD_TTL_SECONDS` | `7200` | central |
@@ -150,5 +161,5 @@ The box test plan and the UI plan are in [interaction-points-next.md](./interact
 - TLS on the broker (decision 6).
 - How the central server reaches the policy engine: engine and decision-service on the same Pi, or janus's decision-service opened to the network with a token (decision 7, with Rocco).
 - The detour flow (decision 14): issuing a child task with `parentTaskId` and revoking the parent in one step.
-- Porting Martin's task creation and activity log on top of the central server (decision 10).
+- Martin's demo and these screens now both create tasks and show activity; whether his task pages call this central server or stay a separate demo (decision 10).
 - Passing the token's claims into the engine request (assumption 7).

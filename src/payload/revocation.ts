@@ -78,7 +78,13 @@ export class MqttBlacklist implements Blacklist {
 }
 
 // The issuer's side, run by the central server. It revokes only what it can verify itself: the request carries the token, not a bare jti, so a client with broker access but without the token cannot revoke anyone's payload.
-export async function serveRevocations(client: MqttClient, payload: PayloadBackend, store: FileBlacklist): Promise<void> {
+// What the central server does besides revoking: record it in the task store and the activity log.
+export type RevocationHooks = {
+  onRevoked?: (jti: string, robotId: string, reason: string) => void;
+  onRefused?: (robotId: string, reason: string) => void;
+};
+
+export async function serveRevocations(client: MqttClient, payload: PayloadBackend, store: FileBlacklist, hooks: RevocationHooks = {}): Promise<void> {
   const announce = (entry: Revoked) =>
     client.publishAsync(`${TOPIC_REVOKED}/${entry.jti}`, JSON.stringify(entry), { qos: 1, retain: true });
 
@@ -103,13 +109,16 @@ export async function serveRevocations(client: MqttClient, payload: PayloadBacke
       // A repeat (drop-off missed the first answer). "revoked" is only returned once the signature has checked out, so the token's own jti can be read.
       jti = jtiOf(req.token);
     } else {
-      console.warn("[central] refused a revoke request:", v.ok ? "robot-mismatch" : v.reason);
+      const reason = v.ok ? "robot-mismatch" : v.reason;
+      console.warn("[central] refused a revoke request:", reason);
+      hooks.onRefused?.(req.robotId, reason);
       return;
     }
     const e = jti ? store.entries()[jti] : undefined;
     if (!jti || !e) return;
     await announce({ jti, reason: e.reason, at: e.at });
     console.log("[central] revoked:", { jti, reason: e.reason, robotId: req.robotId });
+    hooks.onRevoked?.(jti, req.robotId, e.reason);
   });
   await client.subscribeAsync(TOPIC_REVOKE_REQUEST, { qos: 1 });
 }

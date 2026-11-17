@@ -47,18 +47,18 @@ service or a live Paradym session is absent, so a report is always honest about 
 |---|---|---|---|---|
 | credentials (trust-anchoring logic) | C1 | 13 | 0 | 0 |
 | openapi (seven service specs) | C1 | 14 | 0 | 0 |
-| payload (interaction-point task token) | C1 | 14 | 0 | 0 |
+| payload (interaction-point task token, task store, activity log) | C1 | 17 | 0 | 0 |
 | decision | C2 | 3 | 0 | 0 |
 | facility | C2 | 4 | 0 | 0 |
 | gate | C2 | 5 | 0 | 1 |
 | robot | C2 | 5 | 0 | 0 |
-| central (token issuer) | C2 | 3 | 0 | 0 |
+| central (token issuer, task record) | C2 | 5 | 0 | 0 |
 | pickup (I-1) | C2 | 6 | 0 | 0 |
 | dropoff (I-2) | C2 | 6 | 0 | 0 |
 | end-to-end (issue, accept, verify, revoke) | C3 | 1 | 0 | 0 |
-| **Total** | | **74** | **0** | **1** |
+| **Total** | | **79** | **0** | **1** |
 
-The credentials, openapi, payload, central, pickup and dropoff rows are from the run of 2026-11-17 (task token in the format agreed with Martin), against the real policy engine and a Mosquitto broker; the other rows are from the earlier full run.
+The credentials, openapi, payload, central, pickup and dropoff rows are from the run of 2026-11-17 (task token in the format agreed with Martin, tasks planned ahead, activity log), against the real policy engine and a Mosquitto broker; the other rows are from the earlier full run.
 
 The one gate skip is a test that needs a live Paradym session key to create a session; it skips
 gracefully rather than failing.
