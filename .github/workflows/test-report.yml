@@ -3,7 +3,7 @@
 # the "report updates when the component changes" we agreed with Frank.
 #
 # Level 1 (this workflow): the self-contained tests that need nothing external - the credential
-# logic (trust anchoring) and the OpenAPI specs. They run on every push and pull request, and
+# logic (trust anchoring), the OpenAPI specs and the payload token (issue, verify, revoke, blacklist). They run on every push and pull request, and
 # the JUnit reports are uploaded as a downloadable artifact.
 # Level 2 (service contracts) and Level 3 (end-to-end) need the live services and Paradym, and
 # run locally for now - see scripts/test-report.mjs.
@@ -60,8 +60,8 @@ jobs:
 
       # The self-contained components. The service-contract and e2e tests are left out here
       # because CI has no running services or Paradym; they are run locally (test-report.mjs).
-      - name: Generate reports (credentials, openapi)
-        run: node scripts/test-report.mjs credentials openapi
+      - name: Generate reports (credentials, openapi, payload)
+        run: node scripts/test-report.mjs credentials openapi payload
 
       # Keep the JUnit reports as a downloadable artifact, even if a test failed, so there is
       # always a report to pick up from the run.
