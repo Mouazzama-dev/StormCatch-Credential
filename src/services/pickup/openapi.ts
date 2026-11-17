@@ -39,6 +39,22 @@ export const pickupOpenapi = {
         },
       },
     },
+    "/pickup/tasks/{id}/recall": {
+      post: {
+        summary: "Recall a delivery that is on its way; forwarded to the central server",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: false,
+          content: { "application/json": { schema: { type: "object", properties: { reason: { type: "string", example: "robot broke down" } } } } },
+        },
+        responses: {
+          "200": { description: "Delivery recalled" },
+          "404": { description: "No such task" },
+          "409": { description: "Only a delivery on its way can be recalled" },
+          "502": { description: "Central server unreachable or refused this desk's issuer token" },
+        },
+      },
+    },
     "/pickup/tasks/{id}/cancel": {
       post: {
         summary: "Cancel a planned task; forwarded to the central server",

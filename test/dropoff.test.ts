@@ -80,6 +80,27 @@ test("dropoff: a task for the clean-room ward (I-3) is refused at this ward (I-2
   assert.equal(r.json.reason, "wrong-point");
 });
 
+test("dropoff: a recalled delivery is refused as recalled, and can't be recalled twice", async (t) => {
+  if (!(await up(BASE.pickup))) return t.skip("pickup not running");
+  if (!(await up(BASE.dropoff))) return t.skip("dropoff not running");
+  const robotId = testRobot();
+  const got = await plannedAndIssued(robotId, "I-2", [{ name: "Insulin pen", quantity: 2 }]);
+  if (!got.ok) return t.skip(`could not plan and issue (${got.why})`);
+  const recalled = await jpost(`${BASE.pickup}/pickup/tasks/${got.taskId}/recall`, { reason: "robot broke down" });
+  assert.equal(recalled.status, 200);
+  assert.equal(recalled.json.status, "recalled");
+  // The recall travels over MQTT like a receipt: give drop-off a moment to hear it.
+  await sleep(500);
+  const r = await jpost(`${BASE.dropoff}/dropoff/check`, { robotId, token: got.token });
+  assert.equal(r.status, 409);
+  assert.equal(r.json.reason, "recalled");
+  const again = await jpost(`${BASE.pickup}/pickup/tasks/${got.taskId}/recall`, {});
+  assert.equal(again.status, 409);
+  assert.equal(again.json.reason, "not-issued");
+  const record = await jget(`${BASE.central}/tasks/${got.taskId}`);
+  assert.ok(record.json.activity.some((e: any) => e.event === "task.recalled" && e.detail === "robot broke down"));
+});
+
 test("dropoff: GET /openapi.json is served", async (t) => {
   if (!(await up(BASE.dropoff))) return t.skip("dropoff not running");
   const { status, json } = await jget(`${BASE.dropoff}/openapi.json`);

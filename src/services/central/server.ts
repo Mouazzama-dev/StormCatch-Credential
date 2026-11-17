@@ -21,7 +21,7 @@ const payload = await payloadBackend(blacklist);
 const tasks = taskStore();
 const activity = activityLog();
 
-await serveRevocations(await connectBroker("central"), payload, blacklist, {
+const { revokeNow } = await serveRevocations(await connectBroker("central"), payload, blacklist, {
   onRevoked: (jti, robotId, reason) => {
     const r = tasks.byJti(jti);
     // A repeated request (drop-off missed the first answer) finds the task already received: nothing new happened.
@@ -148,7 +148,28 @@ app.post("/tasks/:id/cancel", (req: Request, res: Response) => {
   res.json(updated);
 });
 
-const STATUSES: TaskStatus[] = ["planned", "issued", "received", "cancelled"];
+// Recall a delivery that is on its way (robot broken, wrong load, code lost): its token is revoked like a receipt, so no ward can accept it any more. Only the issuer's side (issuer token) can recall.
+app.post("/tasks/:id/recall", async (req: Request, res: Response) => {
+  if (!requireIssuer(req, res)) return;
+  const id = String(req.params.id);
+  const record = tasks.get(id);
+  if (!record) {
+    res.status(404).json({ error: `no task ${id}`, reason: "no-task" });
+    return;
+  }
+  if (record.status !== "issued" || !record.jti) {
+    res.status(409).json({ error: `only a delivery on its way can be recalled; this one is ${record.status}`, reason: "not-issued" });
+    return;
+  }
+  const why = typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim().slice(0, 200) : undefined;
+  await revokeNow(record.jti, "recalled");
+  const updated = tasks.update(id, (r) => (r.status = "recalled"));
+  activity.add({ event: "task.recalled", taskId: id, robotId: record.robotId, point: record.task.from, outcome: "ok", detail: why ?? "recalled by the pharmacy" });
+  console.log("[central] recalled:", { taskId: id, jti: record.jti });
+  res.json(updated);
+});
+
+const STATUSES: TaskStatus[] = ["planned", "issued", "received", "cancelled", "recalled"];
 
 app.get("/tasks", (req: Request, res: Response) => {
   const robotId = typeof req.query.robotId === "string" ? req.query.robotId : undefined;

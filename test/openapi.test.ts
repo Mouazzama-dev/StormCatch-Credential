@@ -16,8 +16,8 @@ const specs: Record<string, { spec: any; expect: string[] }> = {
   gate: { spec: gateOpenapi, expect: ["GET /health", "POST /verify", "POST /webhook", "GET /result/{id}"] },
   decision: { spec: decisionOpenapi, expect: ["GET /health", "POST /decision"] },
   robot: { spec: robotOpenapi, expect: ["GET /health", "POST /reset", "POST /accept", "POST /present"] },
-  central: { spec: centralOpenapi, expect: ["GET /health", "POST /tasks", "GET /tasks", "GET /tasks/{id}", "POST /tasks/{id}/issue", "POST /tasks/{id}/cancel", "GET /activity", "POST /activity"] },
-  pickup: { spec: pickupOpenapi, expect: ["GET /health", "POST /pickup/tasks", "POST /pickup/tasks/{id}/cancel", "POST /pickup/check", "POST /pickup"] },
+  central: { spec: centralOpenapi, expect: ["GET /health", "POST /tasks", "GET /tasks", "GET /tasks/{id}", "POST /tasks/{id}/issue", "POST /tasks/{id}/cancel", "POST /tasks/{id}/recall", "GET /activity", "POST /activity"] },
+  pickup: { spec: pickupOpenapi, expect: ["GET /health", "POST /pickup/tasks", "POST /pickup/tasks/{id}/cancel", "POST /pickup/tasks/{id}/recall", "POST /pickup/check", "POST /pickup"] },
   dropoff: { spec: dropoffOpenapi, expect: ["GET /health", "POST /dropoff/check", "POST /dropoff"] },
 };
 

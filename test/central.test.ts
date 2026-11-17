@@ -28,6 +28,7 @@ test("central: planning, issuing and cancelling need the issuer token", async (t
   assert.equal(await post("/tasks", { robotId: ROBOT, from: "I-1", to: "I-2", items }, "Bearer not-the-token"), 401);
   assert.equal(await post("/tasks/task-x/issue", { robotId: ROBOT }), 401);
   assert.equal(await post("/tasks/task-x/cancel", {}), 401);
+  assert.equal(await post("/tasks/task-x/recall", {}), 401);
 });
 
 test("central: reporting an event needs the desk token", async (t) => {

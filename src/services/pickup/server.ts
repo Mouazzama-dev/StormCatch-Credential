@@ -53,6 +53,11 @@ app.post("/pickup/tasks", async (req: Request, res: Response) => {
   if (r) res.status(r.status).json(r.json);
 });
 
+app.post("/pickup/tasks/:id/recall", async (req: Request, res: Response) => {
+  const r = await central(res, `/tasks/${encodeURIComponent(String(req.params.id))}/recall`, req.body ?? {});
+  if (r) res.status(r.status).json(r.json);
+});
+
 app.post("/pickup/tasks/:id/cancel", async (req: Request, res: Response) => {
   const r = await central(res, `/tasks/${encodeURIComponent(String(req.params.id))}/cancel`, {});
   if (r) res.status(r.status).json(r.json);

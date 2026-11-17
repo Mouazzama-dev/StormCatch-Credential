@@ -4,7 +4,7 @@ import type { Task, TaskItem } from "./types.ts";
 
 // The central server's record of tasks and of everything that happened to them. Tasks are planned ahead (the pharmacy summons a robot), issued when the pharmacist confirms the load, and received at the ward. Both are plain files next to the blacklist; the pilot is small enough to read them whole.
 
-export type TaskStatus = "planned" | "issued" | "received" | "cancelled";
+export type TaskStatus = "planned" | "issued" | "received" | "cancelled" | "recalled";
 
 export type TaskRecord = {
   robotId: string;

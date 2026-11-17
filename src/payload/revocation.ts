@@ -58,6 +58,11 @@ export class MqttBlacklist implements Blacklist {
     return this.revoked.has(jti);
   }
 
+  // Why a token was revoked ("received", "recalled"), so a desk can say which.
+  reasonOf(jti: string): string | undefined {
+    return this.revoked.get(jti)?.reason;
+  }
+
   // Ask the central server to revoke and wait for its revoked/<jti> announcement. Safe to repeat: it answers a repeat by announcing the same jti again.
   async requestRevoke(jti: string, request: RevokeRequest, timeoutMs: number): Promise<void> {
     if (this.revoked.has(jti)) return;
@@ -84,7 +89,8 @@ export type RevocationHooks = {
   onRefused?: (robotId: string, reason: string) => void;
 };
 
-export async function serveRevocations(client: MqttClient, payload: PayloadBackend, store: FileBlacklist, hooks: RevocationHooks = {}): Promise<void> {
+// Returns `revokeNow`, the issuer's own revoke (a recall): blacklist the jti and announce it, so every verifier refuses the token from then on.
+export async function serveRevocations(client: MqttClient, payload: PayloadBackend, store: FileBlacklist, hooks: RevocationHooks = {}): Promise<{ revokeNow: (jti: string, reason: string) => Promise<void> }> {
   const announce = (entry: Revoked) =>
     client.publishAsync(`${TOPIC_REVOKED}/${entry.jti}`, JSON.stringify(entry), { qos: 1, retain: true });
 
@@ -121,6 +127,13 @@ export async function serveRevocations(client: MqttClient, payload: PayloadBacke
     hooks.onRevoked?.(jti, req.robotId, e.reason);
   });
   await client.subscribeAsync(TOPIC_REVOKE_REQUEST, { qos: 1 });
+  return {
+    revokeNow: async (jti, reason) => {
+      await payload.revoke(jti, reason);
+      const e = store.entries()[jti];
+      await announce({ jti, reason: e?.reason ?? reason, at: e?.at ?? new Date().toISOString() });
+    },
+  };
 }
 
 function jtiOf(token: string): string | undefined {

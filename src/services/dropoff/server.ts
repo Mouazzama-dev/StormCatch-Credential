@@ -35,7 +35,9 @@ async function inspect(robotId: string, token: string): Promise<Inspection> {
   if (!v.ok) {
     // A spent token is a conflict (already received), a token for another point a refusal, anything else an invalid token.
     const status = v.reason === "revoked" ? 409 : v.reason === "wrong-point" ? 403 : 401;
-    return { ok: false, status, body: { error: "task token rejected", reason: v.reason } };
+    // A revoked token was either received already or recalled by the pharmacy; the desk says which.
+    const reason = v.reason === "revoked" && revocations.reasonOf(taskJtiOf(token) ?? "") === "recalled" ? "recalled" : v.reason;
+    return { ok: false, status, body: { error: "task token rejected", reason } };
   }
   // The route passes through other points too; only the task's destination may take the payload.
   if (v.claims.task.to !== POINT_ID) {
@@ -75,6 +77,15 @@ function reportCheck(event: string, robotId: string, token: string, result: Insp
   const taskId = result.ok ? result.claims.task.id : taskIdOf(token);
   const detail = result.ok ? "valid" : String(result.body.reason ?? result.body.error ?? result.status);
   report({ event, robotId, taskId, point: POINT_ID, outcome: result.ok ? "ok" : "refused", detail });
+}
+
+// The jti of a token whose signature already checked out (revoked tokens only reach here after it did), to look up why it was revoked.
+function taskJtiOf(token: string): string | undefined {
+  try {
+    return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).jti;
+  } catch {
+    return undefined;
+  }
 }
 
 // The task id of a token that failed a check, read without trusting it, for the log only.
