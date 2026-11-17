@@ -5,6 +5,7 @@ export const BASE = {
   decision: process.env.DECISION_URL ?? "http://localhost:4003",
   robot: process.env.ROBOT_URL ?? "http://localhost:4004",
   pickup: process.env.PICKUP_URL ?? "http://localhost:4005",
+  central: process.env.CENTRAL_URL ?? "http://localhost:4007",
   dropoff: process.env.DROPOFF_URL ?? "http://localhost:4006",
 };
 

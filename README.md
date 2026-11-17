@@ -14,8 +14,9 @@ The credential backend is four containers, plus the policy engine which runs as 
 | gate | 4002 | Verifier (checkpoint). Starts the presentation request, receives the Paradym webhook, delegates the decision. | `POST /verify`, `GET /result/:id`, `POST /webhook` | `/docs` |
 | decision | 4003 | Adapter. Turns a friendly request into the engine's full AuthorizeBody and forwards it. | `POST /decision` | `/docs` |
 | robot | 4004 | Headless Credo holder. Receives and presents credentials, no phone wallet. | `POST /accept`, `POST /present`, `POST /reset` | `/docs` |
-| pickup | 4005 | Manned interaction point (engine `I-1`). Authorises the robot, issues the payload token, and is the only service that revokes one. | `POST /pickup/check`, `POST /pickup` | `/docs` |
-| dropoff | 4006 | Manned interaction point (engine `I-2`). Verifies the payload token and has pickup revoke it over MQTT. | `POST /dropoff/check`, `POST /dropoff` | `/docs` |
+| pickup | 4005 | Manned interaction point (engine `I-1`). Authorises the robot and, on "Loaded", asks the central server for the task token. | `POST /pickup/check`, `POST /pickup` | `/docs` |
+| central | 4007 | The issuer of task tokens (Martin's task JWT format). Mints on request from the pickup desk and revokes over MQTT. | `POST /tasks` | `/docs` |
+| dropoff | 4006 | Manned interaction point (engine `I-2`). Verifies the task token and has the central server revoke it over MQTT. | `POST /dropoff/check`, `POST /dropoff` | `/docs` |
 | broker | 1883 | Mosquitto. Carries payload revoke requests and the retained revoked list. | MQTT | - |
 | policy engine | 5174 | RDI's `@stormcatch/authoriser`. Runs the staged pipeline (Layer 1, trust, deny, Cedar). Own repo. | `POST /api/authorize`, `/api/docs` | `/api/docs` |
 
@@ -135,7 +136,7 @@ The policy engine runs a second, independent trust check (Layer 1 plus a trust l
 ## Repository layout
 
 - `src/services/` - the facility, gate, decision, pickup and dropoff HTTP services, each with its `openapi.ts` spec.
-- `src/payload/` - the payload token (`PayloadBackend` interface, JWT backend, blacklist) and MQTT revocation by proxy.
+- `src/payload/` - the task token (`PayloadBackend` interface, JWT backend, points and routes, blacklist) and MQTT revocation by proxy.
 - `broker/` - the Mosquitto config, ACL and start script for the revocation broker.
 - `docs/` - design notes, including the interaction-point decisions.
 - The pickup and drop-off desk screens live in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui), next to the phase test pages.

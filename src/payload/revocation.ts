@@ -3,7 +3,7 @@ import type { MqttClient } from "mqtt";
 import type { Blacklist, FileBlacklist } from "./blacklist.ts";
 import type { PayloadBackend } from "./types.ts";
 
-// Revocation by proxy over MQTT. Only the issuer (pickup) revokes a payload: drop-off asks it to, and pickup announces every revoked jti as a RETAINED message, one topic per jti. Any verifier (drop-off now, the transit gates later) subscribes to those topics and so holds the blacklist without reaching pickup's store, which is how the list is shared across devices. The decisions behind this are in docs/interaction-points.md.
+// Revocation by proxy over MQTT. Only the issuer (the central server) revokes a task token: drop-off asks it to, and the central server announces every revoked jti as a RETAINED message, one topic per jti. Any verifier (drop-off now, the transit gates later) subscribes to those topics and so holds the blacklist without reaching the central server's store, which is how the list is shared across devices. The decisions behind this are in docs/interaction-points.md.
 export const TOPIC_REVOKE_REQUEST = "stormcatch/payload/revoke-request";
 export const TOPIC_REVOKED = "stormcatch/payload/revoked";
 
@@ -11,7 +11,7 @@ export type RevokeRequest = { token: string; robotId: string; reason: string };
 type Revoked = { jti: string; reason: string; at: string };
 
 // One login per service: the broker's ACL decides who may publish what (broker/acl). `role` is the username; its password comes from <ROLE>_MQTT_PASSWORD.
-export async function connectBroker(role: "pickup" | "dropoff"): Promise<MqttClient> {
+export async function connectBroker(role: "central" | "dropoff"): Promise<MqttClient> {
   const url = process.env.MQTT_URL ?? "mqtt://localhost:1883";
   const client = await mqtt.connectAsync(url, {
     clientId: `${role}-${process.pid}`,
@@ -58,13 +58,13 @@ export class MqttBlacklist implements Blacklist {
     return this.revoked.has(jti);
   }
 
-  // Ask pickup to revoke and wait for its revoked/<jti> announcement. Safe to repeat: pickup answers a repeat by announcing the same jti again.
+  // Ask the central server to revoke and wait for its revoked/<jti> announcement. Safe to repeat: it answers a repeat by announcing the same jti again.
   async requestRevoke(jti: string, request: RevokeRequest, timeoutMs: number): Promise<void> {
     if (this.revoked.has(jti)) return;
     const confirmed = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiters.delete(jti);
-        reject(new Error(`pickup did not confirm the revoke of ${jti} within ${timeoutMs} ms`));
+        reject(new Error(`the central server did not confirm the revoke of ${jti} within ${timeoutMs} ms`));
       }, timeoutMs);
       this.waiters.set(jti, () => {
         clearTimeout(timer);
@@ -77,7 +77,7 @@ export class MqttBlacklist implements Blacklist {
   }
 }
 
-// The issuer's side, run by pickup. It revokes only what it can verify itself: the request carries the token, not a bare jti, so a client with broker access but without the token cannot revoke anyone's payload.
+// The issuer's side, run by the central server. It revokes only what it can verify itself: the request carries the token, not a bare jti, so a client with broker access but without the token cannot revoke anyone's payload.
 export async function serveRevocations(client: MqttClient, payload: PayloadBackend, store: FileBlacklist): Promise<void> {
   const announce = (entry: Revoked) =>
     client.publishAsync(`${TOPIC_REVOKED}/${entry.jti}`, JSON.stringify(entry), { qos: 1, retain: true });
@@ -91,7 +91,7 @@ export async function serveRevocations(client: MqttClient, payload: PayloadBacke
     try {
       req = JSON.parse(message.toString()) as RevokeRequest;
     } catch {
-      console.warn("[pickup] ignored an unreadable revoke request");
+      console.warn("[central] ignored an unreadable revoke request");
       return;
     }
     const v = await payload.verify(req.token);
@@ -103,13 +103,13 @@ export async function serveRevocations(client: MqttClient, payload: PayloadBacke
       // A repeat (drop-off missed the first answer). "revoked" is only returned once the signature has checked out, so the token's own jti can be read.
       jti = jtiOf(req.token);
     } else {
-      console.warn("[pickup] refused a revoke request:", v.ok ? "robot-mismatch" : v.reason);
+      console.warn("[central] refused a revoke request:", v.ok ? "robot-mismatch" : v.reason);
       return;
     }
     const e = jti ? store.entries()[jti] : undefined;
     if (!jti || !e) return;
     await announce({ jti, reason: e.reason, at: e.at });
-    console.log("[pickup] revoked:", { jti, reason: e.reason, robotId: req.robotId });
+    console.log("[central] revoked:", { jti, reason: e.reason, robotId: req.robotId });
   });
   await client.subscribeAsync(TOPIC_REVOKE_REQUEST, { qos: 1 });
 }

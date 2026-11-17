@@ -6,6 +6,7 @@ import { facilityOpenapi } from "../services/facility/openapi.ts";
 import { gateOpenapi } from "../services/gate/openapi.ts";
 import { decisionOpenapi } from "../services/decision/openapi.ts";
 import { robotOpenapi } from "../../robot-agent/src/openapi.ts";
+import { centralOpenapi } from "../services/central/openapi.ts";
 import { pickupOpenapi } from "../services/pickup/openapi.ts";
 import { dropoffOpenapi } from "../services/dropoff/openapi.ts";
 
@@ -14,6 +15,7 @@ const services = [
   { name: "gate", file: "src/services/gate/server.ts", spec: gateOpenapi },
   { name: "decision", file: "src/services/decision/server.ts", spec: decisionOpenapi },
   { name: "robot", file: "robot-agent/src/robot-service.ts", spec: robotOpenapi },
+  { name: "central", file: "src/services/central/server.ts", spec: centralOpenapi },
   { name: "pickup", file: "src/services/pickup/server.ts", spec: pickupOpenapi },
   { name: "dropoff", file: "src/services/dropoff/server.ts", spec: dropoffOpenapi },
 ];

@@ -2,7 +2,7 @@
 // Each file in test/ is one component; e2e.test.ts is the end-to-end block.
 //
 // Offline components (credentials, openapi, payload) run anywhere. The service-contract components
-// (facility, gate, decision, robot) need their service running, pickup and dropoff also the MQTT broker, the decision-service and the engine, and e2e needs the full stack
+// (facility, gate, decision, robot) need their service running, central, pickup and dropoff also the MQTT broker, the decision-service and the engine, and e2e needs the full stack
 // plus RUN_E2E=1; without those they report failures. For a full green report, bring the
 // stack up first (docker compose up, or pnpm facility|gate|decision|robot + the engine, and
 // RUN_E2E=1 for the e2e block), then run this.

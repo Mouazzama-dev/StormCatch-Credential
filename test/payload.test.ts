@@ -1,80 +1,113 @@
-// OFFLINE test - no running services needed. The JWT payload backend and the file blacklist: issue, verify, revoke, and the ways a token is rejected. Safe for CI.
+// OFFLINE test - no running services needed. The task token (the format agreed with Martin) and the file blacklist: issue, verify, revoke, the point checks, and the ways a token is rejected. Safe for CI.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { generateKeyPair } from "jose";
+import { decodeProtectedHeader, generateKeyPair } from "jose";
 import { FileBlacklist } from "../src/payload/blacklist.ts";
 import { JwtPayloadBackend } from "../src/payload/jwt.ts";
+import { pointUrn, routeOf, toPointId } from "../src/payload/points.ts";
+import type { Task } from "../src/payload/types.ts";
 
 const ROBOT = "urn:stormcatch:robot:SC-M1:SN-2026-000123";
+const ISSUER = "urn:stormcatch:central";
 const keys = await generateKeyPair("ES256");
 const tmpFile = () => path.join(mkdtempSync(path.join(tmpdir(), "payload-")), "blacklist.json");
-const backend = (ttl = 3600, file = tmpFile()) => new JwtPayloadBackend(keys, new FileBlacklist(file), ttl);
+const backend = (ttl = 3600, file = tmpFile(), issuer = ISSUER) => new JwtPayloadBackend(keys, new FileBlacklist(file), ttl, issuer);
 
-test("payload: issue then verify returns the claims", async () => {
-  const b = backend();
-  const { token, jti } = await b.issue("sc:medicine", ROBOT);
-  const v = await b.verify(token);
-  assert.ok(v.ok);
-  assert.equal(v.claims.jti, jti);
-  assert.equal(v.claims.sub, ROBOT);
-  assert.equal(v.claims.payload_type, "sc:medicine");
-  assert.equal(v.claims.exp - v.claims.iat, 3600);
+const task = (to = "I-2"): Task => ({
+  id: "task-0001",
+  type: "medicine-delivery",
+  from: "I-1",
+  to,
+  items: [
+    { code: "PARACETAMOL-500", name: "Paracetamol 500 mg", quantity: 20 },
+    { code: "AMOXICILLIN-250", name: "Amoxicillin 250 mg", quantity: 14 },
+  ],
+  gates: routeOf("I-1", to)!,
+  parentTaskId: null,
 });
 
-test("payload: contents travel in the token, and are left out when empty", async () => {
+test("payload: issue then verify returns Martin's claim structure", async () => {
   const b = backend();
-  const listed = await b.verify((await b.issue("sc:medicine", ROBOT, ["Paracetamol 500 mg x 20", "Insulin pen x 2"])).token);
-  assert.ok(listed.ok);
-  assert.deepEqual(listed.claims.contents, ["Paracetamol 500 mg x 20", "Insulin pen x 2"]);
-  const empty = await b.verify((await b.issue("sc:medicine", ROBOT, [])).token);
-  assert.ok(empty.ok);
-  assert.equal("contents" in empty.claims, false);
+  const { token, jti } = await b.issue(ROBOT, task());
+  const header = decodeProtectedHeader(token);
+  assert.equal(header.alg, "ES256");
+  assert.equal(header.typ, "task+jwt");
+  assert.equal(typeof header.kid, "string");
+  const v = await b.verify(token);
+  assert.ok(v.ok);
+  assert.equal(v.claims.iss, ISSUER);
+  assert.equal(v.claims.sub, ROBOT);
+  assert.equal(v.claims.jti, jti);
+  assert.deepEqual(v.claims.aud, ["I-1", "G-1", "G-2", "G-3", "I-2"].map(pointUrn));
+  assert.equal(v.claims.nbf, v.claims.iat);
+  assert.equal(v.claims.exp - v.claims.iat, 3600);
+  assert.deepEqual(v.claims.task, task());
+  assert.equal("cnf" in v.claims, false, "no cnf without a PIC thumbprint");
+});
+
+test("payload: a PIC thumbprint travels as cnf.x5t#S256", async () => {
+  const b = backend();
+  const v = await b.verify((await b.issue(ROBOT, task(), { cnfThumbprint: "PtAI6v9TOOgOHUhoLHlldTkWJvt9fx9DI0Qu3yXVx4g" })).token);
+  assert.ok(v.ok);
+  assert.deepEqual(v.claims.cnf, { "x5t#S256": "PtAI6v9TOOgOHUhoLHlldTkWJvt9fx9DI0Qu3yXVx4g" });
+});
+
+test("payload: a point on the route accepts the token, a point off it refuses it", async () => {
+  const b = backend();
+  const { token } = await b.issue(ROBOT, task("I-2"));
+  assert.ok((await b.verify(token, pointUrn("I-2"))).ok);
+  assert.ok((await b.verify(token, pointUrn("G-3"))).ok);
+  assert.deepEqual(await b.verify(token, pointUrn("I-3")), { ok: false, reason: "wrong-point" });
+});
+
+test("payload: a token from another issuer is refused", async () => {
+  const other = backend(3600, tmpFile(), "urn:stormcatch:somebody-else");
+  const { token } = await other.issue(ROBOT, task());
+  assert.deepEqual(await backend().verify(token), { ok: false, reason: "invalid-issuer" });
 });
 
 test("payload: each issue gets its own jti", async () => {
   const b = backend();
-  const a = await b.issue("sc:medicine", ROBOT);
-  const c = await b.issue("sc:medicine", ROBOT);
-  assert.notEqual(a.jti, c.jti);
+  assert.notEqual((await b.issue(ROBOT, task())).jti, (await b.issue(ROBOT, task())).jti);
 });
 
 test("payload: a revoked token is rejected as revoked", async () => {
   const b = backend();
-  const { token, jti } = await b.issue("sc:medicine", ROBOT);
+  const { token, jti } = await b.issue(ROBOT, task());
   await b.revoke(jti, "received");
   assert.deepEqual(await b.verify(token), { ok: false, reason: "revoked" });
 });
 
 test("payload: the blacklist is shared through the file across backends", async () => {
   const file = tmpFile();
-  const pickup = backend(3600, file);
-  const dropoff = backend(3600, file);
-  const { token, jti } = await pickup.issue("sc:medicine", ROBOT);
-  await dropoff.revoke(jti);
-  assert.deepEqual(await pickup.verify(token), { ok: false, reason: "revoked" });
+  const central = backend(3600, file);
+  const other = backend(3600, file);
+  const { token, jti } = await central.issue(ROBOT, task());
+  await other.revoke(jti);
+  assert.deepEqual(await central.verify(token), { ok: false, reason: "revoked" });
 });
 
 test("payload: an expired token is rejected as expired", async () => {
   const b = backend(-60);
-  const { token } = await b.issue("sc:medicine", ROBOT);
+  const { token } = await b.issue(ROBOT, task());
   assert.deepEqual(await b.verify(token), { ok: false, reason: "expired" });
 });
 
 test("payload: a token signed by another key is rejected", async () => {
-  const other = new JwtPayloadBackend(await generateKeyPair("ES256"), new FileBlacklist(tmpFile()), 3600);
-  const { token } = await other.issue("sc:medicine", ROBOT);
+  const other = new JwtPayloadBackend(await generateKeyPair("ES256"), new FileBlacklist(tmpFile()), 3600, ISSUER);
+  const { token } = await other.issue(ROBOT, task());
   assert.deepEqual(await backend().verify(token), { ok: false, reason: "invalid-signature" });
 });
 
 test("payload: a tampered token is rejected", async () => {
   const b = backend();
-  const { token } = await b.issue("sc:medicine", ROBOT);
+  const { token } = await b.issue(ROBOT, task());
   const [h, p, s] = token.split(".");
   const claims = JSON.parse(Buffer.from(p, "base64url").toString());
-  claims.sub = "urn:stormcatch:robot:SC-M1:SN-OTHER";
+  claims.task.items[0].quantity = 200;
   const forged = [h, Buffer.from(JSON.stringify(claims)).toString("base64url"), s].join(".");
   assert.deepEqual(await b.verify(forged), { ok: false, reason: "invalid-signature" });
 });
@@ -84,8 +117,17 @@ test("payload: garbage is rejected as malformed", async () => {
 });
 
 test("payload: a verify-only backend (public key alone) cannot mint", async () => {
-  const verifier = new JwtPayloadBackend({ publicKey: keys.publicKey }, new FileBlacklist(tmpFile()), 3600);
-  await assert.rejects(verifier.issue("sc:medicine", ROBOT), /no payload signing key/);
+  const verifier = new JwtPayloadBackend({ publicKey: keys.publicKey }, new FileBlacklist(tmpFile()), 3600, ISSUER);
+  await assert.rejects(verifier.issue(ROBOT, task()), /only the central server issues/);
+});
+
+test("points: routes follow the procedures, Martin's names map to engine ids", () => {
+  assert.deepEqual(routeOf("I-1", "I-2"), ["I-1", "G-1", "G-2", "G-3", "I-2"]);
+  assert.deepEqual(routeOf("I-1", "I-3"), ["I-1", "G-1", "G-2", "G-4", "I-4", "G-5", "I-3"]);
+  assert.equal(routeOf("I-2", "I-1"), undefined);
+  assert.equal(toPointId("gate-pharmacy"), "I-1");
+  assert.equal(toPointId("gate-ward-3b"), "I-2");
+  assert.equal(toPointId("I-3"), "I-3");
 });
 
 test("blacklist: add is idempotent and has reports membership", async () => {

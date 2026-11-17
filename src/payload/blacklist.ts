@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-// Revoked payload ids. A JWT cannot be revoked, so its jti is blacklisted and every verifier checks the list. Two implementations: this file store is the issuer's (pickup's) own record, and MqttBlacklist (./revocation.ts) is the copy a verifier keeps from the broker. Both sit behind the same two async calls so either can become a central store later.
+// Revoked payload ids. A JWT cannot be revoked, so its jti is blacklisted and every verifier checks the list. Two implementations: this file store is the issuer's (the central server's) own record, and MqttBlacklist (./revocation.ts) is the copy a verifier keeps from the broker. Both sit behind the same two async calls so either can become a central store later.
 export interface Blacklist {
   add(jti: string, reason: string): Promise<void>;
   has(jti: string): Promise<boolean>;

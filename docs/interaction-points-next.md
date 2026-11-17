@@ -8,7 +8,7 @@ Two plans for what comes after the first cut described in [interaction-points.md
 
 | Device | Role | Status |
 |---|---|---|
-| Central server (always-on Raspberry Pi) | MQTT broker; possibly the engine and decision-service | Ordered (Frank, 2026-11-13). Until it arrives, the developer's own machine is the central server. |
+| Central server (always-on Raspberry Pi) | MQTT broker and the central service (the token issuer); possibly the engine and decision-service | Ordered (Frank, 2026-11-13). Until it arrives, the developer's own machine is the central server. |
 | Desk laptop(s) | pickup and drop-off services and the desk screens (credential-lifecycle-ui); QR by webcam or keyboard-style scanner | Any laptop on the test network |
 | janus (`sc-dev-cm5-janus`) | engine :5175, decision-service :4003, gate :4002 | Decision and engine on loopback only |
 | bishop (`sc-dev-pi5-bishop`) | the robot: robot-service :4004, camera, QR reader | Available |
@@ -26,8 +26,8 @@ Today everything runs on the developer's machine and works end to end. The pilot
 
 Goal: the services and the real engine work with the broker on its pilot host.
 
-1. Start Mosquitto on the central server with the repo's `broker/` config (Docker, or the `mosquitto` package with a box-local config) and the two passwords.
-2. On a desk laptop, start pickup, drop-off and the UI with `MQTT_URL=mqtt://<central server>:1883` and `DECISION_URL` pointing at the agreed decision-service.
+1. Start Mosquitto on the central server with the repo's `broker/` config (Docker, or the `mosquitto` package with a box-local config) and the two passwords, and start `pnpm central` there with `ISSUER_TOKEN` and the signing key.
+2. On a desk laptop, start pickup, drop-off and the UI with `MQTT_URL=mqtt://<central server>:1883`, `CENTRAL_URL=http://<central server>:4007`, the same `ISSUER_TOKEN`, the public key, and `DECISION_URL` pointing at the agreed decision-service.
 3. Run `node --import tsx --test test/payload.test.ts test/pickup.test.ts test/dropoff.test.ts` on the laptop.
 
 Pass: 19 tests, 0 skipped; the decision log shows `pilot:I-1` and `pilot:I-2` permits for our calls.
@@ -84,7 +84,7 @@ Both describe the same sequence: sign in, identify the robot by its QR, authoris
 
 ### Built: first version (credential-lifecycle-ui)
 
-The two screens below exist as a first version in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui) (pages Pickup and Drop-off), next to the phase test pages, on the two check endpoints and the contents claim. The robot id is typed or scanned with a keyboard-style scanner, the token is handed between desks through the browser instead of the robot, and there is no sign-in yet.
+The two screens below exist as a first version in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui) (pages Pickup and Drop-off), next to the phase test pages, on the two check endpoints and the task token. The robot id is typed or scanned with a keyboard-style scanner, the token is handed between desks through the browser instead of the robot, and there is no sign-in yet.
 
 ### How I see it
 
@@ -93,7 +93,7 @@ One small web app, in Martin's stack (Nuxt with the crt-demo design system), so 
 1. Pickup desk (pharmacist, desktop at I-1)
    - Scan or type the robot's id.
    - Check: "Robot SC-M1 / SN-2026-000123 may collect medicine" or the refusal with the engine's reason.
-   - Choose the contents (the virtual medication list), load, press "Loaded".
+   - Choose the destination ward and the items with quantities (the virtual medication), load, press "Loaded".
    - The app issues the token and puts it on the robot; it shows the token's id and expiry.
 2. Drop-off desk (doctor, phone at I-2)
    - Scan the robot's QR; the app fetches the token from the robot.
@@ -103,7 +103,7 @@ One small web app, in Martin's stack (Nuxt with the crt-demo design system), so 
 ### Gaps the UI needs closed in the backend first
 
 1. Check before commit. Done: `POST /pickup/check` and `POST /dropoff/check` answer without issuing or revoking; `POST /pickup` and `POST /dropoff` stay the commit.
-2. Contents in the token. Done: `POST /pickup` takes a `contents` list (the medication), carried in the token as the `contents` claim and shown at drop-off. Still to add: who loaded it, once sign-in exists.
+2. Contents in the token. Done: the task token (Martin's format) carries `task.items` with code, name and quantity, shown at drop-off. Still to add: who loaded it, once sign-in exists.
 3. Token on the robot. "Puts it on the robot" and "scan the robot's QR, the JSON comes out" mean robot-service has to store the payload token and hand it over at drop-off. Today the token travels in the HTTP body. This is a robot-service change, kept separate from the trusted-verifier task.
 4. Who signed in. Once the certificate platform is the OpenID provider, pickup and drop-off should accept its sign-in and record who issued and who received.
 
@@ -116,5 +116,5 @@ One small web app, in Martin's stack (Nuxt with the crt-demo design system), so 
 
 ### Open questions for the team
 
-- One token format with Martin's task JWT. His tasks carry an origin and a destination (pharmacy to ward 3B), ours carry the robot and the contents; adding `from` and `to` to ours makes them nearly the same. Also: who signs it (his company certificate or our ES256 key), and one blacklist (his database or our retained MQTT list).
+- Settled with Martin (2026-11-17): one token format (his task JWT with the engine's point ids), plain ES256 signing, the central server as issuer, and the retained MQTT list as the gate store. See decisions 3, 11 to 14 in [interaction-points.md](./interaction-points.md).
 - Is the robot's QR at drop-off the same one the gate reads (its DID endpoint), and does the token travel over that same endpoint?

@@ -18,6 +18,7 @@
     "decision": "tsx --env-file=.env src/services/decision/server.ts",
     "facility": "SERVICE_ROLE=facility tsx --env-file=.env src/services/facility/server.ts",
     "gate": "SERVICE_ROLE=gate tsx --env-file=.env src/services/gate/server.ts",
+    "central": "tsx --env-file=.env src/services/central/server.ts",
     "pickup": "tsx --env-file=.env src/services/pickup/server.ts",
     "dropoff": "tsx --env-file=.env src/services/dropoff/server.ts",
     "task-template": "SERVICE_ROLE=facility tsx --env-file=.env src/scripts/task-template.ts",

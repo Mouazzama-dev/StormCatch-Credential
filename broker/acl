@@ -1,5 +1,5 @@
-# Only pickup (the issuer) announces a revoke; only drop-off asks for one. Gates get a read-only line here when they start checking payload tokens.
-user pickup
+# Only the central server (the issuer) announces a revoke; only drop-off asks for one. Gates get a read-only line here when they start checking task tokens.
+user central
 topic read stormcatch/payload/revoke-request
 topic readwrite stormcatch/payload/revoked/#
 

@@ -1,20 +1,21 @@
 import express from "express";
 import type { Request, Response } from "express";
 import { payloadBackend } from "../../payload/index.ts";
-import type { PayloadClaims } from "../../payload/index.ts";
+import type { TaskClaims } from "../../payload/index.ts";
+import { pointUrn } from "../../payload/points.ts";
 import { MqttBlacklist, connectBroker } from "../../payload/revocation.ts";
 import { mountDocs } from "../_docs.ts";
 import { authorisePoint } from "../_authorise.ts";
 import { dropoffOpenapi } from "./openapi.ts";
 
-// dropoff-service: the manned end of a delivery (doctor). Checks the payload token the robot carries, authorises the robot, then has the issuer (pickup) revoke the token over MQTT so the payload cannot be handed over twice. "received" is answered only once pickup confirms the revoke. The token is checked before the engine is asked: it is local and cheap, and a forged or spent token needs no policy decision.
+// dropoff-service: the manned end of a delivery (doctor). Checks the task token the robot carries (issued by the central server, addressed to this point, ending here), authorises the robot, then has the issuer revoke the token over MQTT so the payload cannot be handed over twice. "received" is answered only once the central server confirms the revoke. The token is checked before the engine is asked: it is local and cheap, and a forged or spent token needs no policy decision.
 const PORT = Number(process.env.DROPOFF_PORT ?? 4006);
 // Unset, the service listens on every interface, which the containers need. On a shared box, DROPOFF_HOST=127.0.0.1 keeps it off the network: the service has no authentication.
 const HOST = process.env.DROPOFF_HOST;
 // The engine's ward medicine handover; I-3 for the clean-room route (procedure B).
 const POINT_ID = process.env.DROPOFF_POINT_ID ?? "I-2";
 
-// How long drop-off waits for pickup to confirm a revoke before answering 504.
+// How long drop-off waits for the central server to confirm a revoke before answering 504.
 const REVOKE_TIMEOUT_MS = Number(process.env.REVOKE_TIMEOUT_MS ?? 5000);
 
 const revocations = await MqttBlacklist.subscribe(await connectBroker("dropoff"));
@@ -26,16 +27,21 @@ app.use(express.json());
 app.get("/health", (_req: Request, res: Response) => res.json({ service: "dropoff", ok: true }));
 
 // Everything drop-off checks before a handover: token valid and not yet received, issued to this robot, robot authorised at this point. Shared by the read-only check and the receipt.
-type Inspection = { ok: true; claims: PayloadClaims } | { ok: false; status: number; body: Record<string, unknown> };
+type Inspection = { ok: true; claims: TaskClaims } | { ok: false; status: number; body: Record<string, unknown> };
 
 async function inspect(robotId: string, token: string): Promise<Inspection> {
-  const v = await payload.verify(token);
+  const v = await payload.verify(token, pointUrn(POINT_ID));
   if (!v.ok) {
-    // A spent token is a conflict (already received), anything else an invalid token.
-    return { ok: false, status: v.reason === "revoked" ? 409 : 401, body: { error: "payload token rejected", reason: v.reason } };
+    // A spent token is a conflict (already received), a token for another point a refusal, anything else an invalid token.
+    const status = v.reason === "revoked" ? 409 : v.reason === "wrong-point" ? 403 : 401;
+    return { ok: false, status, body: { error: "task token rejected", reason: v.reason } };
+  }
+  // The route passes through other points too; only the task's destination may take the payload.
+  if (v.claims.task.to !== POINT_ID) {
+    return { ok: false, status: 403, body: { error: `this task ends at ${v.claims.task.to}, not here (${POINT_ID})`, reason: "wrong-point" } };
   }
   if (v.claims.sub !== robotId) {
-    return { ok: false, status: 403, body: { error: "payload token was issued to another robot", reason: "robot-mismatch" } };
+    return { ok: false, status: 403, body: { error: "task token was issued to another robot", reason: "robot-mismatch" } };
   }
   let auth;
   try {
@@ -51,7 +57,7 @@ async function inspect(robotId: string, token: string): Promise<Inspection> {
 }
 
 // What the desk shows of a payload.
-const describe = (c: PayloadClaims) => ({ jti: c.jti, payloadType: c.payload_type, contents: c.contents ?? [], issuedAt: c.iat, expiresAt: c.exp });
+const describe = (c: TaskClaims) => ({ jti: c.jti, taskId: c.task.id, type: c.task.type, from: c.task.from, to: c.task.to, items: c.task.items, issuedAt: c.iat, expiresAt: c.exp });
 
 function readBody(req: Request, res: Response): { robotId: string; token: string } | undefined {
   const { robotId, token } = req.body ?? {};
@@ -89,10 +95,10 @@ app.post("/dropoff", async (req: Request, res: Response) => {
   } catch (err) {
     // Not received: the token is still live, so the same drop-off can simply be retried.
     console.warn("[dropoff] revoke not confirmed:", (err as Error).message);
-    res.status(504).json({ error: "pickup did not confirm the revoke, retry the drop-off", reason: "revoke-unconfirmed" });
+    res.status(504).json({ error: "the central server did not confirm the revoke, retry the drop-off", reason: "revoke-unconfirmed" });
     return;
   }
-  console.log("[dropoff] received:", { robotId: body.robotId, payloadType: claims.payload_type, jti: claims.jti });
+  console.log("[dropoff] received:", { robotId: body.robotId, taskId: claims.task.id, jti: claims.jti });
   res.json({ status: "received", ...describe(claims) });
 });
 

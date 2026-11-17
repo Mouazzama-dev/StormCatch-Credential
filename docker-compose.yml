@@ -39,7 +39,7 @@ services:
     image: eclipse-mosquitto:2
     command: /mosquitto/config/start.sh
     environment:
-      PICKUP_MQTT_PASSWORD: ${PICKUP_MQTT_PASSWORD}
+      CENTRAL_MQTT_PASSWORD: ${CENTRAL_MQTT_PASSWORD}
       DROPOFF_MQTT_PASSWORD: ${DROPOFF_MQTT_PASSWORD}
     volumes:
       - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
