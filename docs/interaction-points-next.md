@@ -1,57 +1,57 @@
 # Interaction points: box test plan and UI plan
 
-Two plans for what comes after the first cut described in [interaction-points.md](./interaction-points.md): how to test pickup and drop-off on the pilot boxes (janus and bishop), and what the user interface for the two points should look like.
+Two plans for what comes after the first cut described in [interaction-points.md](./interaction-points.md): how to test pickup and drop-off on the pilot hardware (central server, desk laptops, janus and bishop), and what the user interface for the two points should look like.
 
 ## Part 1: testing on the boxes
 
-### What is on the boxes today
+### Where things run
 
-| Box | Runs (pilot stack, Rocco's account) | Reachable |
+| Device | Role | Status |
 |---|---|---|
-| janus (`sc-dev-cm5-janus`) | engine :5175, decision-service :4003, gate :4002, e-paper, Cloudflare tunnel | decision and engine on loopback only; gate on the LAN |
-| bishop (`sc-dev-pi5-bishop`) | robot-service :4004, camera, dashboard, QR reader | loopback, camera stream on demand |
+| Central server (always-on Raspberry Pi) | MQTT broker; possibly the engine and decision-service | Ordered (Frank, 2026-11-13). Until it arrives, the developer's own machine is the central server. |
+| Desk laptop(s) | pickup and drop-off services and the desk screens (`ui/`); QR by webcam or keyboard-style scanner | Any laptop on the test network |
+| janus (`sc-dev-cm5-janus`) | engine :5175, decision-service :4003, gate :4002 | Decision and engine on loopback only |
+| bishop (`sc-dev-pi5-bishop`) | the robot: robot-service :4004, camera, QR reader | Available |
 
-Our own account (`mbi`) can reach janus's decision-service on `127.0.0.1:4003` without the engine token, so pickup and drop-off can run on janus as `mbi`, against the real box engine, without touching the pilot stack, its files or its start scripts.
+Today everything runs on the developer's machine and works end to end. The pilot boxes are on Frank's network and are reached through Cloudflare, so they cannot connect to a broker on a developer's laptop: the box stages below start when the central server Pi is in place.
 
 ### Before any stage
 
-1. janus is stable: no down/degraded entries in #device-status for a while, and `ssh janus hostname` returns. (On 2026-11-09 janus flapped and closed every SSH session right after authentication; that is Rocco's to fix.)
-2. Rocco knows and agrees: the test runs on his box, on ports 1883, 4005 and 4006.
-3. The pickup/drop-off work is committed. The box gets exactly that commit, shipped with `git archive`, into its own folder (`~/ip-test`), never into the pilot's checkout.
-4. The read-only box check has been run on janus and bishop: node and pnpm for `mbi`, whether `mosquitto`/Docker/sudo exist, free ports, and that the box engine permits `I-1` with `sc:medicine_pickup`.
+1. The central server Pi is delivered and on the test network, and stays online (#device-status).
+2. Frank and Rocco know and agree: ports 1883 (broker), 4005 and 4006 (pickup, drop-off).
+3. The path from the desk to the policy engine is agreed with Rocco: engine and decision-service on the central server, or janus's decision-service opened to the network with a token. Today janus's only listens on loopback.
+4. The pickup/drop-off work is committed; what runs on a device is exactly that commit (`git archive`), in its own folder, never inside the pilot's checkout.
 
-### Stage 1: everything on janus
+### Stage 1: broker on the central server
 
-Goal: the services, the broker and the real box engine work together.
+Goal: the services and the real engine work with the broker on its pilot host.
 
-1. Ship the commit: `git archive --prefix=ip-test/ HEAD | ssh janus 'tar -x -C ~'`, then on janus `cd ~/ip-test && pnpm install --frozen-lockfile`.
-2. Broker. With sudo: install the `mosquitto` package and run it as `mbi` with a box-local config (the repo's `broker/` files assume the container's paths). Without sudo: ask Rocco to install it, or run the broker on the laptop for this stage only (`MQTT_URL` points at it).
-3. `~/ip-test/.env` holds only `PICKUP_MQTT_PASSWORD` and `DROPOFF_MQTT_PASSWORD`. Pickup and drop-off use no Paradym settings.
-4. Start pickup and drop-off with `DECISION_URL=http://127.0.0.1:4003`, bound to loopback (`PICKUP_HOST=127.0.0.1`, `DROPOFF_HOST=127.0.0.1`).
-5. Run `node --import tsx --test test/payload.test.ts test/pickup.test.ts test/dropoff.test.ts` on janus.
+1. Start Mosquitto on the central server with the repo's `broker/` config (Docker, or the `mosquitto` package with a box-local config) and the two passwords.
+2. On a desk laptop, start pickup, drop-off and the UI with `MQTT_URL=mqtt://<central server>:1883` and `DECISION_URL` pointing at the agreed decision-service.
+3. Run `node --import tsx --test test/payload.test.ts test/pickup.test.ts test/dropoff.test.ts` on the laptop.
 
-Pass: 19 tests, 0 skipped; the decision log on janus shows `pilot:I-1` and `pilot:I-2` permits for our calls.
+Pass: 19 tests, 0 skipped; the decision log shows `pilot:I-1` and `pilot:I-2` permits for our calls.
 
 ### Stage 2: bishop plays the robot
 
-Goal: the box-to-box path works. bishop asks for a payload at pickup, keeps the token, and hands it over at drop-off.
+Goal: the robot side works over the network. bishop asks for a payload at pickup, keeps the token, and hands it over at drop-off.
 
-1. Restart pickup and drop-off on janus bound to the LAN (`PICKUP_HOST=0.0.0.0`, `DROPOFF_HOST=0.0.0.0`). They have no authentication, so only for the length of the test.
-2. From bishop: `POST http://sc-dev-cm5-janus.local:4005/pickup` with bishop's robot id, keep the token in a file, then `POST :4006/dropoff` with it, then the same drop-off again.
+1. Bind pickup and drop-off on the laptop to the network (`PICKUP_HOST=0.0.0.0`, `DROPOFF_HOST=0.0.0.0`). They have no authentication, so only for the length of the test.
+2. From bishop: `POST http://<laptop>:4005/pickup` with bishop's robot id, keep the token, then `POST :4006/dropoff` with it, then the same drop-off again.
 
 Pass: pickup 200, drop-off 200 `received`, repeat 409 `revoked`. The token travels by hand (curl), not inside robot-service yet; see "Gaps" in Part 2.
 
-### Stage 3: drop-off on a second device (later)
+### Stage 3: pickup and drop-off on different laptops
 
-Goal: the revoke by proxy really crosses devices: drop-off on bishop, broker and pickup on janus. Blocked today: drop-off needs a decision-service, and janus's is loopback-only by design. Needs Rocco: either a LAN-reachable decision endpoint with a token, or the real desk hardware with its own path to the engine.
+Goal: the revoke by proxy really crosses devices: pickup on one laptop, drop-off on another, the broker on the central server between them. Pass: the receipt at drop-off is confirmed by pickup on the other laptop, and a restarted drop-off still refuses the used token (it relearns the revoked list from the broker).
 
 ### Stage 4: part of the pilot (later)
 
-Pickup, drop-off and the broker started by the pilot's start scripts and provisioning, like the gate. That changes Rocco's files (`pilot/`), so it is his change or done together with him, after stages 1 and 2 pass.
+The broker started and kept up by the central server's provisioning, like the gate on janus. That changes the pilot's files (`pilot/`), so it is done with Rocco and Frank, after stages 1 to 3 pass.
 
 ### Clean up after each run
 
-Stop the three processes, remove `~/ip-test/.payload` (dev keys and blacklist) and the broker's data, and restore loopback binding. Nothing else on the box changes.
+Stop the services, remove `.payload/` (dev keys and blacklist) on the laptops and the broker's data on the central server, and restore loopback binding.
 
 ## Part 2: the UI
 
@@ -107,8 +107,14 @@ One small web app, in Martin's stack (Nuxt with the crt-demo design system), so 
 3. Token on the robot. "Puts it on the robot" and "scan the robot's QR, the JSON comes out" mean robot-service has to store the payload token and hand it over at drop-off. Today the token travels in the HTTP body. This is a robot-service change, kept separate from the trusted-verifier task.
 4. Who signed in. Once the certificate platform is the OpenID provider, pickup and drop-off should accept its sign-in and record who issued and who received.
 
+### Decided in the team meeting (2026-11-10)
+
+- The desks are laptops. The robot's QR code is read with the webcam or with a barcode scanner that types like a keyboard; the robot id field takes either. No Raspberry Pi per desk.
+- Onboarding (hospital, KYC, robot certificates) stays in Martin's app. Tasks, the policy engine and the MQTT revocation are this work, so the parts of Martin's demo after onboarding move here: creating a task (robot, from, to, medication), the activity log, and the gate's check of the task token.
+- Terminology (Frank): every point a robot interacts with is an interaction point; a gate is an interaction point without a person, a "dumb" one.
+- Not for the pilot: the simplified screens for non-technical users, Martin's deep links, and the extra security levels (counters, online-only). One app or separate modules is for the team to decide after the pilot.
+
 ### Open questions for the team
 
-- Desktop app with a camera at I-1 (Frank) or a phone scan at both points? One web app can do both.
-- Does Martin build the issuing platform (his offer) on top of our pickup/drop-off services, or do we build the UI and he provides sign-in?
+- One token format with Martin's task JWT. His tasks carry an origin and a destination (pharmacy to ward 3B), ours carry the robot and the contents; adding `from` and `to` to ours makes them nearly the same. Also: who signs it (his company certificate or our ES256 key), and one blacklist (his database or our retained MQTT list).
 - Is the robot's QR at drop-off the same one the gate reads (its DID endpoint), and does the token travel over that same endpoint?
