@@ -1,6 +1,7 @@
 import express from "express";
 import { setupAgent, acceptOffer, presentCredential } from "./agent.ts";
 import { mountDocs } from "./docs.ts";
+import { DeliveryError, ROBOT_ID, carried, carry, drop } from "./deliveries.ts";
 import { robotOpenapi } from "./openapi.ts";
 
 const PORT = Number(process.env.ROBOT_PORT ?? 4004);
@@ -14,7 +15,7 @@ async function main() {
   app.use(express.json());
 
   app.get("/health", (_req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, robotId: ROBOT_ID });
   });
 
   // Clear stored SD-JWT VCs so each demo run starts from an empty wallet.
@@ -56,7 +57,38 @@ async function main() {
       res.status(500).json({ ok: false, error: (e as Error)?.message ?? String(e) });
     }
   });
-mountDocs(app, robotOpenapi);
+  // The delivery codes the robot carries: the pharmacy desk hands one over when it sends the robot off, a ward desk asks for its own when it scans the robot, and the desk that ends the delivery (received, refused, recalled) has the robot drop it.
+  const failed = (res: express.Response, e: unknown) =>
+    e instanceof DeliveryError ? res.status(e.status).json({ error: e.message, reason: e.reason }) : res.status(500).json({ error: (e as Error)?.message ?? String(e) });
+
+  app.post("/deliveries", async (req, res) => {
+    try {
+      const c = await carry(agent, req.body?.token);
+      const { token: _token, ...shown } = c;
+      res.status(201).json({ robotId: ROBOT_ID, ...shown });
+    } catch (e) {
+      failed(res, e);
+    }
+  });
+
+  app.get("/deliveries", async (req, res) => {
+    try {
+      const to = typeof req.query.to === "string" && req.query.to ? req.query.to : undefined;
+      res.json({ robotId: ROBOT_ID, deliveries: await carried(agent, to) });
+    } catch (e) {
+      failed(res, e);
+    }
+  });
+
+  app.delete("/deliveries/:taskId", async (req, res) => {
+    try {
+      res.json({ dropped: await drop(agent, req.params.taskId) });
+    } catch (e) {
+      failed(res, e);
+    }
+  });
+
+  mountDocs(app, robotOpenapi);
 
   app.listen({ port: PORT, host: HOST }, () => console.log(`robot-service listening on http://localhost:${PORT}`));
 }
