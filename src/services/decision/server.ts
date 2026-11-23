@@ -72,11 +72,19 @@ function baselineRobot(now: number): Record<string, unknown> {
     hasDisinfection: true,
     disinfectionExpiresAt: now + 900,
     disinfectionIssuer: "did:key:z6MkAmcDeconStation1",
+    // The payload a robot on procedure A carries: medicine loaded at the pharmacy (I-1) for the ward (I-2). The engine screens the payload issuer by its class of goods (payloadType), so a payload without one is refused at trust. A stand-in like the rest of this baseline until the payload facts come from the robot's own task token.
     hasPayloadCredential: true,
     payloadExpiresAt: now + 7200,
     payloadIssuer: "did:key:z6MkAmcPharmacy00001",
+    payloadType: "sc:medicine",
+    payloadOrigin: "I-1",
+    payloadDestination: "I-2",
   };
 }
+
+// The pharmacy counter, where the robot is loaded, and what a robot without a payload presents.
+const PICKUP_POINT = "I-1";
+const NO_PAYLOAD = { hasPayloadCredential: false, payloadExpiresAt: 0, payloadIssuer: "", payloadType: "", payloadOrigin: "", payloadDestination: "" };
 
 function baselineTask(pointId: string, now: number): Record<string, unknown> {
   return {
@@ -122,6 +130,8 @@ app.post("/decision", async (req: Request, res: Response) => {
 
   const now = Math.floor(Date.now() / 1000);
   const robot = baselineRobot(now);
+  // Procedure A: the robot arrives at the pharmacy counter (I-1) empty, and the engine refuses a pickup by a robot that already holds a payload. The baseline payload is what it carries after loading.
+  if (pointId === PICKUP_POINT) Object.assign(robot, NO_PAYLOAD);
   robot.hasTaskAuthorization = true;
   robot.taskAuthActions = action ? [String(action)] : [];
   robot.taskAuthScopes = scope !== undefined && scope !== null ? [String(scope)] : [];
