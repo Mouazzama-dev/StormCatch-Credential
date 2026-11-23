@@ -4,7 +4,8 @@ import type { Task, TaskItem } from "./types.ts";
 
 // The central server's record of tasks and of everything that happened to them. Tasks are planned ahead (the pharmacy summons a robot), issued when the pharmacist confirms the load, and received at the ward. Both are plain files next to the blacklist; the pilot is small enough to read them whole.
 
-export type TaskStatus = "planned" | "issued" | "received" | "cancelled" | "recalled";
+// "refused": the ward refused the goods; the robot takes them back to the pharmacy.
+export type TaskStatus = "planned" | "issued" | "received" | "refused" | "cancelled" | "recalled";
 
 export type TaskRecord = {
   robotId: string;
@@ -129,3 +130,21 @@ export function readItems(raw: unknown): TaskItem[] | null {
   }
   return items;
 }
+
+// What a ward may answer when a robot hands over its goods, and why it refused: the policy engine's vocabulary (authorize contract 0.2.0, handoverAnswer and refusalReason), spelled exactly as it is.
+export const HANDOVER_ANSWERS = ["sc:accepted", "sc:refused"] as const;
+export const REFUSAL_REASONS = ["sc:wrong_item", "sc:damaged", "sc:not_expected", "sc:late"] as const;
+export type RefusalReason = (typeof REFUSAL_REASONS)[number];
+
+// The goods class a task carries unless it says otherwise: the pilot's medicine.
+export const DEFAULT_PAYLOAD_TYPE = "sc:medicine";
+
+// A desk may write a reason with or without the "sc:" prefix; this returns the engine's spelling, or null when it is not one of the four.
+export function refusalReasonOf(raw: unknown): RefusalReason | null {
+  if (typeof raw !== "string") return null;
+  const r = raw.startsWith("sc:") ? raw : `sc:${raw}`;
+  return (REFUSAL_REASONS as readonly string[]).includes(r) ? (r as RefusalReason) : null;
+}
+
+// The reason a revoke request carries: "received", or "refused:<reason>" for a refusal at the ward.
+export const refusedRevokeReason = (reason: RefusalReason) => `refused:${reason}`;

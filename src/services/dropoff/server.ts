@@ -7,6 +7,7 @@ import { MqttBlacklist, connectBroker } from "../../payload/revocation.ts";
 import { mountDocs } from "../_docs.ts";
 import { authorisePoint } from "../_authorise.ts";
 import { report } from "../_activity.ts";
+import { refusalReasonOf, refusedRevokeReason } from "../../payload/tasks.ts";
 import { dropoffOpenapi } from "./openapi.ts";
 
 // dropoff-service: the manned end of a delivery (doctor). Checks the task token the robot carries (issued by the central server, addressed to this point, ending here), authorises the robot, then has the issuer revoke the token over MQTT so the payload cannot be handed over twice. "received" is answered only once the central server confirms the revoke. The token is checked before the engine is asked: it is local and cheap, and a forged or spent token needs no policy decision.
@@ -35,8 +36,9 @@ async function inspect(robotId: string, token: string): Promise<Inspection> {
   if (!v.ok) {
     // A spent token is a conflict (already received), a token for another point a refusal, anything else an invalid token.
     const status = v.reason === "revoked" ? 409 : v.reason === "wrong-point" ? 403 : 401;
-    // A revoked token was either received already or recalled by the pharmacy; the desk says which.
-    const reason = v.reason === "revoked" && revocations.reasonOf(taskJtiOf(token) ?? "") === "recalled" ? "recalled" : v.reason;
+    // A revoked token was received already, refused at a ward, or recalled by the pharmacy; the desk says which.
+    const why = v.reason === "revoked" ? revocations.reasonOf(taskJtiOf(token) ?? "") : undefined;
+    const reason = why === "recalled" ? "recalled" : why?.startsWith("refused:") ? "refused" : v.reason;
     return { ok: false, status, body: { error: "task token rejected", reason } };
   }
   // The route passes through other points too; only the task's destination may take the payload.
@@ -60,7 +62,7 @@ async function inspect(robotId: string, token: string): Promise<Inspection> {
 }
 
 // What the desk shows of a payload.
-const describe = (c: TaskClaims) => ({ jti: c.jti, taskId: c.task.id, type: c.task.type, from: c.task.from, to: c.task.to, items: c.task.items, issuedAt: c.iat, expiresAt: c.exp });
+const describe = (c: TaskClaims) => ({ jti: c.jti, taskId: c.task.id, type: c.task.type, ...(c.task.payloadType ? { payloadType: c.task.payloadType } : {}), from: c.task.from, to: c.task.to, items: c.task.items, issuedAt: c.iat, expiresAt: c.exp });
 
 function readBody(req: Request, res: Response): { robotId: string; token: string } | undefined {
   const { robotId, token } = req.body ?? {};
@@ -109,9 +111,24 @@ app.post("/dropoff/check", async (req: Request, res: Response) => {
   res.json({ status: "valid", ...describe(result.claims) });
 });
 
+// The nurse's answer: accepted (the default, receipt as before) or refused with one of the engine's reasons. Either way the delivery is over and its token is revoked; on a refusal the robot takes the goods back to the pharmacy.
 app.post("/dropoff", async (req: Request, res: Response) => {
   const body = readBody(req, res);
   if (!body) return;
+  const answer = req.body?.answer ?? "accepted";
+  if (answer !== "accepted" && answer !== "refused") {
+    res.status(400).json({ error: "answer must be accepted or refused" });
+    return;
+  }
+  const reason = answer === "refused" ? refusalReasonOf(req.body?.reason) : null;
+  if (answer === "refused" && !reason) {
+    res.status(400).json({ error: "a refusal needs a reason: sc:wrong_item, sc:damaged, sc:not_expected or sc:late" });
+    return;
+  }
+  if (answer === "accepted" && req.body?.reason !== undefined) {
+    res.status(400).json({ error: "a reason is given only with a refusal" });
+    return;
+  }
   const result = await inspect(body.robotId, body.token);
   if (!result.ok) reportCheck("dropoff.receive", body.robotId, body.token, result);
   if (!result.ok) {
@@ -121,12 +138,17 @@ app.post("/dropoff", async (req: Request, res: Response) => {
   const { claims } = result;
 
   try {
-    await revocations.requestRevoke(claims.jti, { token: body.token, robotId: body.robotId, reason: "received" }, REVOKE_TIMEOUT_MS);
+    await revocations.requestRevoke(claims.jti, { token: body.token, robotId: body.robotId, reason: reason ? refusedRevokeReason(reason) : "received" }, REVOKE_TIMEOUT_MS);
   } catch (err) {
     // Not received: the token is still live, so the same drop-off can simply be retried.
     console.warn("[dropoff] revoke not confirmed:", (err as Error).message);
     report({ event: "dropoff.receive", robotId: body.robotId, taskId: claims.task.id, point: POINT_ID, outcome: "refused", detail: "revoke-unconfirmed" });
     res.status(504).json({ error: "the central server did not confirm the revoke, retry the drop-off", reason: "revoke-unconfirmed" });
+    return;
+  }
+  if (reason) {
+    console.log("[dropoff] refused:", { robotId: body.robotId, taskId: claims.task.id, reason });
+    res.json({ status: "refused", reason, returnTo: claims.task.from, ...describe(claims) });
     return;
   }
   console.log("[dropoff] received:", { robotId: body.robotId, taskId: claims.task.id, jti: claims.jti });

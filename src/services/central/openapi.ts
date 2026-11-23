@@ -4,7 +4,7 @@ const items = { type: "array", minItems: 1, maxItems: 20, items: { type: "object
   name: { type: "string", example: "Paracetamol 500 mg" },
   quantity: { type: "integer", minimum: 1, maximum: 1000, example: 20 },
 } } } as const;
-const taskRecord = { type: "object", description: "{ robotId, status: planned | issued | received | cancelled | recalled, task, jti?, createdAt, updatedAt }", additionalProperties: true } as const;
+const taskRecord = { type: "object", description: "{ robotId, status: planned | issued | received | refused | cancelled | recalled, task, jti?, createdAt, updatedAt }", additionalProperties: true } as const;
 const idParam = [{ name: "id", in: "path", required: true, schema: { type: "string" } }] as const;
 
 export const centralOpenapi = {
@@ -33,6 +33,7 @@ export const centralOpenapi = {
               to: { type: "string", example: "I-2" },
               items,
               type: { type: "string", example: "medicine-delivery" },
+              payloadType: { type: "string", example: "sc:medicine", default: "sc:medicine", description: "The class of goods in the engine's vocabulary; carried in the token as task.payloadType" },
               parentTaskId: { type: "string", nullable: true, description: "Set for a detour task" },
             },
           } } },
@@ -48,7 +49,7 @@ export const centralOpenapi = {
         summary: "List tasks, newest first",
         parameters: [
           { name: "robotId", in: "query", required: false, schema: { type: "string" } },
-          { name: "status", in: "query", required: false, schema: { type: "string", enum: ["planned", "issued", "received", "cancelled", "recalled"] } },
+          { name: "status", in: "query", required: false, schema: { type: "string", enum: ["planned", "issued", "received", "refused", "cancelled", "recalled"] } },
         ],
         responses: { "200": { description: "Task records", content: { "application/json": { schema: { type: "array", items: taskRecord } } } } },
       },

@@ -101,6 +101,47 @@ test("dropoff: a recalled delivery is refused as recalled, and can't be recalled
   assert.ok(record.json.activity.some((e: any) => e.event === "task.recalled" && e.detail === "robot broke down"));
 });
 
+test("dropoff: POST /dropoff checks the answer before the token: a refusal needs one of the four reasons, an acceptance takes none", async (t) => {
+  if (!(await up(BASE.dropoff))) return t.skip("dropoff not running");
+  const token = "not-a-jwt";
+  for (const body of [
+    { robotId: ROBOT, token, answer: "maybe" },
+    { robotId: ROBOT, token, answer: "refused" },
+    { robotId: ROBOT, token, answer: "refused", reason: "sc:too_cold" },
+    { robotId: ROBOT, token, reason: "sc:late" },
+  ]) {
+    assert.equal((await jpost(`${BASE.dropoff}/dropoff`, body)).status, 400, JSON.stringify(body));
+  }
+});
+
+test("dropoff: the ward refuses a delivery: the token is revoked, the task becomes refused, the same token is turned away as refused", async (t) => {
+  if (!(await up(BASE.pickup))) return t.skip("pickup not running");
+  if (!(await up(BASE.dropoff))) return t.skip("dropoff not running");
+  const robotId = testRobot();
+  const got = await plannedAndIssued(robotId, "I-2", [{ name: "Insulin pen", quantity: 2 }]);
+  if (!got.ok) return t.skip(`could not plan and issue (${got.why})`);
+  const checked = await jpost(`${BASE.dropoff}/dropoff/check`, { robotId, token: got.token });
+  if (checked.status === 502 || checked.status === 403) return t.skip(`dropoff not authorised (${checked.status})`);
+  assert.equal(checked.json.payloadType, "sc:medicine", "the token carries the goods class");
+
+  // The desk may leave out the sc: prefix; the answer comes back in the engine's spelling.
+  const refused = await jpost(`${BASE.dropoff}/dropoff`, { robotId, token: got.token, answer: "refused", reason: "damaged" });
+  assert.equal(refused.status, 200);
+  assert.equal(refused.json.status, "refused");
+  assert.equal(refused.json.reason, "sc:damaged");
+  assert.equal(refused.json.returnTo, "I-1");
+
+  const again = await jpost(`${BASE.dropoff}/dropoff`, { robotId, token: got.token });
+  assert.equal(again.status, 409);
+  assert.equal(again.json.reason, "refused");
+
+  await sleep(300);
+  const record = await jget(`${BASE.central}/tasks/${got.taskId}`);
+  assert.equal(record.json.status, "refused");
+  assert.ok(record.json.activity.some((e: any) => e.event === "task.refused" && e.outcome === "refused" && e.detail.startsWith("sc:damaged")), "timeline records the refusal and its reason");
+  assert.ok(!record.json.activity.some((e: any) => e.event === "task.received"), "a refused delivery is not received");
+});
+
 test("dropoff: GET /openapi.json is served", async (t) => {
   if (!(await up(BASE.dropoff))) return t.skip("dropoff not running");
   const { status, json } = await jget(`${BASE.dropoff}/openapi.json`);

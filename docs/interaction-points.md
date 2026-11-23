@@ -7,7 +7,7 @@ The pilot route is pickup (manned) -> transit gates (unmanned) -> drop-off (mann
 | Point | Service | Engine point | Does |
 |---|---|---|---|
 | Pickup (pharmacist) | pickup, port 4005 | `I-1` pharmacy pickup counter | `POST /pickup/tasks` plans a task (the pharmacy summons a robot); `POST /pickup/check` answers whether the robot may collect and which planned task it is here for; `POST /pickup`, on "Loaded", has the central server issue the token for that task. Holds no signing key. |
-| Central server | central, port 4007 | - | The issuer and the record. Keeps the tasks (planned, issued, received, cancelled, recalled) and the activity log, issues a planned task's token when the pickup desk asks (issuer token), keeps the blacklist and revokes over MQTT. Runs next to the broker. |
+| Central server | central, port 4007 | - | The issuer and the record. Keeps the tasks (planned, issued, received, refused, cancelled, recalled) and the activity log, issues a planned task's token when the pickup desk asks (issuer token), keeps the blacklist and revokes over MQTT. Runs next to the broker. |
 | Drop-off (doctor) | dropoff, port 4006 | `I-2` ward medicine handover (`I-3` in the clean room) | `POST /dropoff/check` shows what the robot carries; `POST /dropoff` asks the central server to revoke the token and answers "received" once it confirms. |
 
 The desk screens for both points are in the developer and test UI, [credential-lifecycle-ui](https://github.com/Stormcatch/credential-lifecycle-ui) (pages Pickup and Drop-off), next to the phase test pages.
@@ -29,6 +29,7 @@ The format agreed with Martin (2026-11-17): his claim structure, with the policy
   "task": {
     "id": "task-...",
     "type": "medicine-delivery",
+    "payloadType": "sc:medicine",
     "from": "I-1",
     "to": "I-2",
     "items": [{ "code": "PARACETAMOL-500", "name": "Paracetamol 500 mg", "quantity": 20 }],
@@ -101,6 +102,7 @@ Choices we made so the pilot could move. Each says why, and what would change it
 15. **Tasks are planned ahead.** Agreed 2026-11-17, as in Martin's demo and procedure A ("the pharmacy employee summons the robot"): a task (robot, destination, items) is planned first and stored on the central server; when the robot reaches the counter, "Check robot" finds its planned task, the pharmacist confirms or adjusts the items, and "Loaded" issues the token for that task. A robot has at most one planned task at a time, so the desk never has to guess which one it is here for; a planned task can be cancelled, an issued one ends at receipt.
 16. **The central server keeps an activity log per task.** Agreed 2026-11-17. One line per event in `.payload/activity.jsonl`: planned, issued, received and refused revokes from the central server itself; every pickup and drop-off check, passed or refused with its reason, reported by the desks. The desks report with their own shared secret, `DESK_TOKEN`, separate from the issuer token so drop-off can report without being able to mint, and fire and forget: a desk never waits for the log, and a central server that is down only costs the log entry. Reading tasks and activity is open on the network, like the other services (assumption 4).
 17. **A delivery on its way can be recalled.** Added 2026-11-17, after a delivery whose code was lost stayed "on its way" with nothing able to end it. The pharmacy side (issuer token) calls `POST /tasks/{id}/recall` (through `POST /pickup/tasks/{id}/recall`) when the robot broke down, the load was wrong or the code was lost: the central server revokes the token exactly as a receipt does, announces it over MQTT, marks the task `recalled` and logs `task.recalled` with the reason. A ward that is then shown the code refuses it with `recalled`, not "already received". A planned task is cancelled instead; a received one is finished.
+18. **The ward can refuse a delivery.** Added 2026-11-23, to match the policy engine's handover policy (authorize contract 0.2.0). The nurse answers the handover: `POST /dropoff` takes `answer` (`accepted`, the default, or `refused`) and, only with a refusal, a `reason` from the engine's list: `sc:wrong_item` (not what was ordered), `sc:damaged` (damaged or seal broken), `sc:not_expected` (nobody expected it), `sc:late` (arrived too late). Either answer ends the delivery and revokes the token through the central server, as the engine requires; the revoke request carries `refused:<reason>`, so the central server marks the task `refused`, logs `task.refused` with the reason, and the robot takes the goods back to where they came from (`returnTo`, the task's `from`). A ward shown a refused code again turns it away with `refused`. The token also carries the class of goods, `task.payloadType` (default `sc:medicine`, the engine's `payloadType`), so the payload claims can be passed to the engine once the decision-service sends them.
 
 ## Assumptions
 

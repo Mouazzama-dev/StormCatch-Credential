@@ -8,6 +8,8 @@ export interface Task {
   id: string;
   // What the errand is, e.g. "medicine-delivery".
   type: string;
+  // The class of goods, in the policy engine's vocabulary (its payloadType, e.g. "sc:medicine"). Absent on tokens issued before 2026-11-24.
+  payloadType?: string;
   // Engine point ids: where the payload is loaded and where it is handed over.
   from: string;
   to: string;

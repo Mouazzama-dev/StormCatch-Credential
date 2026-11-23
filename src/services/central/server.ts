@@ -3,7 +3,7 @@ import express from "express";
 import type { Request, Response } from "express";
 import { activityLog, deskToken, issuerBlacklist, issuerToken, payloadBackend, taskStore } from "../../payload/index.ts";
 import { routeOf, toPointId } from "../../payload/points.ts";
-import { readItems, MAX_ITEMS } from "../../payload/tasks.ts";
+import { DEFAULT_PAYLOAD_TYPE, readItems, MAX_ITEMS } from "../../payload/tasks.ts";
 import type { TaskRecord, TaskStatus } from "../../payload/tasks.ts";
 import { connectBroker, serveRevocations } from "../../payload/revocation.ts";
 import { mountDocs } from "../_docs.ts";
@@ -24,8 +24,15 @@ const activity = activityLog();
 const { revokeNow } = await serveRevocations(await connectBroker("central"), payload, blacklist, {
   onRevoked: (jti, robotId, reason) => {
     const r = tasks.byJti(jti);
-    // A repeated request (drop-off missed the first answer) finds the task already received: nothing new happened.
+    // A repeated request (drop-off missed the first answer) finds the task already ended: nothing new happened.
     if (!r || r.status !== "issued") return;
+    // A refusal at the ward ends the delivery too (the token is revoked either way), but the robot takes the goods back to where they came from.
+    if (reason.startsWith("refused:")) {
+      const why = reason.slice("refused:".length);
+      tasks.update(r.task.id, (x) => (x.status = "refused"));
+      activity.add({ event: "task.refused", taskId: r.task.id, robotId, point: r.task.to, outcome: "refused", detail: `${why}; back to ${r.task.from}` });
+      return;
+    }
     tasks.update(r.task.id, (x) => (x.status = "received"));
     activity.add({ event: "task.received", taskId: r.task.id, robotId, point: r.task.to, outcome: "ok", detail: `token revoked (${reason})` });
   },
@@ -51,7 +58,11 @@ function requireIssuer(req: Request, res: Response): boolean {
 // Plan a task: the pharmacy summons a robot for a delivery. Nothing is issued yet. One planned task per robot at a time, so the pickup desk knows which one the robot is here for.
 app.post("/tasks", (req: Request, res: Response) => {
   if (!requireIssuer(req, res)) return;
-  const { robotId, type, parentTaskId } = req.body ?? {};
+  const { robotId, type, parentTaskId, payloadType } = req.body ?? {};
+  if (payloadType !== undefined && (typeof payloadType !== "string" || !/^sc:[a-z_]{1,40}$/.test(payloadType))) {
+    res.status(400).json({ error: "payloadType must be a goods class in the engine's vocabulary, e.g. sc:medicine" });
+    return;
+  }
   const from = typeof req.body?.from === "string" ? toPointId(req.body.from) : "";
   const to = typeof req.body?.to === "string" ? toPointId(req.body.to) : "";
   const items = readItems(req.body?.items);
@@ -80,6 +91,7 @@ app.post("/tasks", (req: Request, res: Response) => {
     task: {
       id: `task-${randomUUID()}`,
       type: typeof type === "string" && type ? type : "medicine-delivery",
+      payloadType: payloadType ?? DEFAULT_PAYLOAD_TYPE,
       from,
       to,
       items,
@@ -169,7 +181,7 @@ app.post("/tasks/:id/recall", async (req: Request, res: Response) => {
   res.json(updated);
 });
 
-const STATUSES: TaskStatus[] = ["planned", "issued", "received", "cancelled", "recalled"];
+const STATUSES: TaskStatus[] = ["planned", "issued", "received", "refused", "cancelled", "recalled"];
 
 app.get("/tasks", (req: Request, res: Response) => {
   const robotId = typeof req.query.robotId === "string" ? req.query.robotId : undefined;
