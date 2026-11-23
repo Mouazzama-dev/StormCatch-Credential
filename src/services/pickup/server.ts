@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { issuerToken } from "../../payload/index.ts";
 import { mountDocs } from "../_docs.ts";
 import { authorisePoint } from "../_authorise.ts";
+import type { PointRequest } from "../_authorise.ts";
 import { report } from "../_activity.ts";
 import { pickupOpenapi } from "./openapi.ts";
 
@@ -13,6 +14,8 @@ const HOST = process.env.PICKUP_HOST;
 // The engine's pharmacy pickup counter.
 const POINT_ID = process.env.PICKUP_POINT_ID ?? "I-1";
 const CENTRAL_URL = process.env.CENTRAL_URL ?? "http://localhost:4007";
+// How long an issued token lives (the central server's PAYLOAD_TTL_SECONDS), to tell the engine when the load the robot still carries expires.
+const TTL_SECONDS = Number(process.env.PAYLOAD_TTL_SECONDS ?? 7200);
 
 const token = await issuerToken();
 
@@ -40,6 +43,19 @@ async function central(res: Response, path: string, body?: unknown): Promise<{ s
     return undefined;
   }
   return { status: r.status, json };
+}
+
+// What the engine is told the robot carries at the counter: nothing, unless the central server has a delivery of this robot still out (issued), which the engine refuses (one load at a time). The central server's record answers this, not the robot. When the central server can't be reached nothing is sent, and the decision-service assumes an empty robot at the counter, as procedure A has it.
+async function carriedNow(robotId: string): Promise<PointRequest["payload"]> {
+  try {
+    const r = await fetch(`${CENTRAL_URL}/tasks?robotId=${encodeURIComponent(robotId)}&status=issued`);
+    if (!r.ok) return undefined;
+    const out = ((await r.json()) as { task: { payloadType?: string; from: string; to: string }; updatedAt: string }[])[0];
+    if (!out) return "none";
+    return { held: { payloadType: out.task.payloadType, origin: out.task.from, destination: out.task.to, expiresAt: Math.floor(Date.parse(out.updatedAt) / 1000) + TTL_SECONDS } };
+  } catch {
+    return undefined;
+  }
 }
 
 // Plan a task: the pharmacy summons a robot for a delivery from this counter.
@@ -70,14 +86,7 @@ app.post("/pickup/check", async (req: Request, res: Response) => {
     res.status(400).json({ error: "robotId is required" });
     return;
   }
-  let auth;
-  try {
-    auth = await authorisePoint(POINT_ID);
-  } catch (err) {
-    res.status(502).json({ error: (err as Error).message });
-    return;
-  }
-  let task = null;
+  let task: any = null;
   let taskError: string | undefined;
   try {
     const r = await fetch(`${CENTRAL_URL}/tasks?robotId=${encodeURIComponent(robotId)}&status=planned`);
@@ -85,6 +94,13 @@ app.post("/pickup/check", async (req: Request, res: Response) => {
     if (!r.ok) taskError = `central server answered ${r.status}`;
   } catch {
     taskError = "the central server is not reachable";
+  }
+  let auth;
+  try {
+    auth = await authorisePoint(POINT_ID, { payload: await carriedNow(robotId), ...(task ? { deliverTo: task.task.to } : {}) });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+    return;
   }
   report({ event: "pickup.check", robotId, point: POINT_ID, taskId: (task as any)?.task?.id, outcome: auth.allowed ? "ok" : "refused", detail: `${auth.decision ?? "no decision"}${auth.determiningPolicies.length ? ` (${auth.determiningPolicies.join(", ")})` : ""}` });
   res.json({ pointId: POINT_ID, ...auth, task, ...(taskError ? { taskError } : {}) });
@@ -98,9 +114,17 @@ app.post("/pickup", async (req: Request, res: Response) => {
     return;
   }
 
+  // Where this delivery goes, for the engine (deliverTo): the planned task's destination. The central server checks the task itself when issuing.
+  let deliverTo: string | undefined;
+  try {
+    const r = await fetch(`${CENTRAL_URL}/tasks/${encodeURIComponent(taskId)}`);
+    if (r.ok) deliverTo = ((await r.json()) as { task: { to: string } }).task.to;
+  } catch {
+    // unreachable: the issue call below says so
+  }
   let auth;
   try {
-    auth = await authorisePoint(POINT_ID);
+    auth = await authorisePoint(POINT_ID, { payload: await carriedNow(robotId), ...(deliverTo ? { deliverTo } : {}) });
   } catch (err) {
     res.status(502).json({ error: (err as Error).message });
     return;

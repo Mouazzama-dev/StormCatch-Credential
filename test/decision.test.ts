@@ -40,3 +40,23 @@ test("decision: POST /decision returns a well-formed decision when the engine is
   assert.ok("decision" in json, "returns a decision field");
   assert.ok(Array.isArray(json.determiningPolicies), "returns determiningPolicies[]");
 });
+
+test("decision: the payload comes from what the caller sends: none, a token that does not verify, or nothing (the baseline)", async (t) => {
+  if (!(await up(BASE.decision))) return t.skip("decision not running");
+  const ask = (body: object) => jpost(`${BASE.decision}/decision`, { action: "sc:medicine_pickup", ...body });
+  const baseline = await ask({ pointId: "I-2" });
+  if (baseline.status === 502) return t.skip("policy engine not reachable from decision-service");
+  assert.equal(baseline.json.payload, "baseline");
+
+  const forged = await ask({ pointId: "I-2", payload: { token: "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln" } });
+  assert.equal(forged.status, 200);
+  assert.ok(forged.json.payload.startsWith("invalid-token:"), forged.json.payload);
+  assert.equal(forged.json.allowed, false, "a handover with no valid payload is refused");
+
+  const none = await ask({ pointId: "I-1", payload: "none" });
+  assert.equal(none.json.payload, "none");
+
+  assert.equal((await ask({ pointId: "I-1", payload: { held: { origin: "I-1" } } })).status, 400);
+  assert.equal((await ask({ pointId: "I-1", payload: 42 })).status, 400);
+  assert.equal((await ask({ pointId: "I-1", deliverTo: 2 })).status, 400);
+});

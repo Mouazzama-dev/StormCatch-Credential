@@ -21,3 +21,10 @@ export function toPointId(name: string): string {
 export function routeOf(from: string, to: string): string[] | undefined {
   return ROUTES[`${from}>${to}`];
 }
+
+// Who the policy engine is told issued a payload loaded at a point: the party responsible for the load, by the DID the engine anchors (its trust list, payload frame). The central server signs the token; the pharmacy is the payload's issuer, as procedure A has it.
+const PAYLOAD_ISSUERS: Record<string, string> = {
+  "I-1": "did:key:z6MkAmcPharmacy00001",
+};
+
+export const payloadIssuerOf = (pointId: string): string | undefined => PAYLOAD_ISSUERS[toPointId(pointId)];

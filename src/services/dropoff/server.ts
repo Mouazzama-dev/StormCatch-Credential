@@ -31,7 +31,8 @@ app.get("/health", (_req: Request, res: Response) => res.json({ service: "dropof
 // Everything drop-off checks before a handover: token valid and not yet received, issued to this robot, robot authorised at this point. Shared by the read-only check and the receipt.
 type Inspection = { ok: true; claims: TaskClaims } | { ok: false; status: number; body: Record<string, unknown> };
 
-async function inspect(robotId: string, token: string): Promise<Inspection> {
+// `answer` is the nurse's answer at the commit, absent at the read-only check (the engine then keeps the payload credential: no revoke obligation).
+async function inspect(robotId: string, token: string, answer?: { handoverAnswer: "sc:accepted" | "sc:refused"; refusalReason?: string }): Promise<Inspection> {
   const v = await payload.verify(token, pointUrn(POINT_ID));
   if (!v.ok) {
     // A spent token is a conflict (already received), a token for another point a refusal, anything else an invalid token.
@@ -50,7 +51,7 @@ async function inspect(robotId: string, token: string): Promise<Inspection> {
   }
   let auth;
   try {
-    auth = await authorisePoint(POINT_ID);
+    auth = await authorisePoint(POINT_ID, { payload: { token }, ...answer });
   } catch (err) {
     return { ok: false, status: 502, body: { error: (err as Error).message } };
   }
@@ -129,7 +130,7 @@ app.post("/dropoff", async (req: Request, res: Response) => {
     res.status(400).json({ error: "a reason is given only with a refusal" });
     return;
   }
-  const result = await inspect(body.robotId, body.token);
+  const result = await inspect(body.robotId, body.token, reason ? { handoverAnswer: "sc:refused", refusalReason: reason } : { handoverAnswer: "sc:accepted" });
   if (!result.ok) reportCheck("dropoff.receive", body.robotId, body.token, result);
   if (!result.ok) {
     res.status(result.status).json(result.body);

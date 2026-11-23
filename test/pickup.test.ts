@@ -1,7 +1,7 @@
 // pickup-service contract tests. Validation is cheap; planning and issuing need the central server, the decision-service and the policy engine, and are skipped (not failed) when any is down or denies.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BASE, up, jpost, jget, testRobot } from "./_helpers.ts";
+import { BASE, up, jpost, jget, testRobot, plannedAndIssued } from "./_helpers.ts";
 
 const items = [{ code: "PARACETAMOL-500", name: "Paracetamol 500 mg", quantity: 20 }];
 
@@ -45,9 +45,13 @@ test("pickup: plan, check finds the planned task, Loaded issues it once", async 
   assert.equal(issued.json.token.split(".").length, 3, "token is a compact JWT");
   assert.deepEqual(issued.json.task.items, loaded, "the items as loaded replace the planned ones");
 
+  // Issued once: the robot now carries that load. An engine with the one-load rule (authorize 0.2.0) refuses it at the counter first; without it the central server answers that the task is no longer planned.
   const again = await jpost(`${BASE.pickup}/pickup`, { robotId, taskId });
-  assert.equal(again.status, 409);
-  assert.equal(again.json.reason, "not-planned");
+  if (again.status === 403) assert.ok(again.json.determiningPolicies.some((p: string) => p.endsWith("payload-none")), `refused for carrying a load: ${again.json.determiningPolicies}`);
+  else {
+    assert.equal(again.status, 409);
+    assert.equal(again.json.reason, "not-planned");
+  }
 
   const record = await jget(`${BASE.central}/tasks/${taskId}`);
   assert.equal(record.json.status, "issued");
@@ -79,6 +83,27 @@ test("pickup: malformed items and an unknown destination are refused when planni
   const noRoute = await jpost(`${BASE.pickup}/pickup/tasks`, { robotId: testRobot(), to: "I-4", items });
   assert.equal(noRoute.status, 400);
   assert.equal(noRoute.json.reason, "no-route");
+});
+
+test("pickup: a robot still out on a delivery is refused at the counter, and served again once that delivery ends", async (t) => {
+  if (!(await up(BASE.pickup))) return t.skip("pickup not running");
+  if (!(await up(BASE.dropoff))) return t.skip("dropoff not running");
+  const robotId = testRobot();
+  const first = await plannedAndIssued(robotId, "I-2", [{ name: "Insulin pen", quantity: 2 }]);
+  if (!first.ok) return t.skip(`could not plan and issue (${first.why})`);
+  const planned = await jpost(`${BASE.pickup}/pickup/tasks`, { robotId, to: "I-2", items: [{ name: "Saline", quantity: 1 }] });
+  assert.equal(planned.status, 201);
+
+  const busy = await jpost(`${BASE.pickup}/pickup/check`, { robotId });
+  assert.equal(busy.status, 200);
+  if (busy.json.allowed) return t.skip("the engine has no one-load rule (authorize 0.2.0 not deployed)");
+  assert.ok(busy.json.determiningPolicies.some((p: string) => p.endsWith("payload-none")), `refused for carrying a load: ${busy.json.determiningPolicies}`);
+  assert.equal(busy.json.task?.task.id, planned.json.task.id, "the planned task is still shown");
+
+  const received = await jpost(`${BASE.dropoff}/dropoff`, { robotId, token: first.token });
+  assert.equal(received.status, 200);
+  const free = await jpost(`${BASE.pickup}/pickup/check`, { robotId });
+  assert.equal(free.json.allowed, true, "empty again once the first delivery was received");
 });
 
 test("pickup: GET /openapi.json is served", async (t) => {

@@ -122,9 +122,10 @@ export async function serveRevocations(client: MqttClient, payload: PayloadBacke
     }
     const e = jti ? store.entries()[jti] : undefined;
     if (!jti || !e) return;
-    await announce({ jti, reason: e.reason, at: e.at });
-    console.log("[central] revoked:", { jti, reason: e.reason, robotId: req.robotId });
+    // The record first, then the announcement: drop-off answers the ward once it hears the announcement, and by then the task must read received (or refused), not still out, for whoever asks next (the pickup desk checking whether the robot is free).
     hooks.onRevoked?.(jti, req.robotId, e.reason);
+    console.log("[central] revoked:", { jti, reason: e.reason, robotId: req.robotId });
+    await announce({ jti, reason: e.reason, at: e.at });
   });
   await client.subscribeAsync(TOPIC_REVOKE_REQUEST, { qos: 1 });
   return {

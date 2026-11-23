@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { mountDocs } from "../_docs.ts";
 import { decisionOpenapi } from "./openapi.ts";
 import { anchoredBirthFacts, issuerKey, pickBirthCertificate, pickTaskAuth, robotUid } from "./credentials.ts";
+import { NO_PAYLOAD, PayloadError, payloadFactsOf } from "./payload.ts";
 
 // decision-service: adapter between the gate and the policy engine's HTTP API
 // (@stormcatch/authoriser `pnpm api`, POST http://127.0.0.1:5174/api/authorize).
@@ -72,11 +73,21 @@ function baselineRobot(now: number): Record<string, unknown> {
     hasDisinfection: true,
     disinfectionExpiresAt: now + 900,
     disinfectionIssuer: "did:key:z6MkAmcDeconStation1",
+    // The payload a robot on procedure A carries: medicine loaded at the pharmacy (I-1) for the ward (I-2). The engine screens the payload issuer by its class of goods (payloadType), so a payload without one is refused at trust. A stand-in like the rest of this baseline until the payload facts come from the robot's own task token.
     hasPayloadCredential: true,
     payloadExpiresAt: now + 7200,
     payloadIssuer: "did:key:z6MkAmcPharmacy00001",
+    payloadType: "sc:medicine",
+    payloadOrigin: "I-1",
+    payloadDestination: "I-2",
   };
 }
+
+// The pharmacy counter, where the robot is loaded.
+const PICKUP_POINT = "I-1";
+
+// What a desk asserts with the request (engine Task, authorize 0.2.0): where the pickup desk sends the payload, and the drop-off desk's answer and why. Optional strings; the engine checks the vocabulary.
+const DESK_FIELDS = ["deliverTo", "handoverAnswer", "refusalReason"] as const;
 
 function baselineTask(pointId: string, now: number): Record<string, unknown> {
   return {
@@ -122,6 +133,28 @@ app.post("/decision", async (req: Request, res: Response) => {
 
   const now = Math.floor(Date.now() / 1000);
   const robot = baselineRobot(now);
+  // The payload facts from what the caller sent (the robot's token, "none", or what it holds per the central server); without any, the baseline stand-in: procedure A, where the robot arrives at the pharmacy counter (I-1) empty, and the engine refuses a pickup by a robot that already holds a payload, and carries the baseline payload after loading.
+  let payload;
+  try {
+    payload = await payloadFactsOf(req.body?.payload);
+  } catch (e) {
+    if (!(e instanceof PayloadError)) throw e;
+    res.status(400).json({ error: e.message });
+    return;
+  }
+  if (payload) Object.assign(robot, payload.facts);
+  else if (pointId === PICKUP_POINT) Object.assign(robot, NO_PAYLOAD);
+  const payloadSource = payload?.source ?? "baseline";
+  const deskFields: Record<string, string> = {};
+  for (const f of DESK_FIELDS) {
+    const v = req.body?.[f];
+    if (v === undefined || v === null || v === "") continue;
+    if (typeof v !== "string") {
+      res.status(400).json({ error: `${f} must be a string` });
+      return;
+    }
+    deskFields[f] = v;
+  }
   robot.hasTaskAuthorization = true;
   robot.taskAuthActions = action ? [String(action)] : [];
   robot.taskAuthScopes = scope !== undefined && scope !== null ? [String(scope)] : [];
@@ -154,12 +187,12 @@ app.post("/decision", async (req: Request, res: Response) => {
       ? `baseline (birth certificate presented by UNANCHORED issuer ${birthIssuer ?? "(absent)"}, facts ignored)`
       : `birth certificate from ${birthIssuer} (serial ${facts.serialNumber ? "read" : "MISSING, baseline kept"}, model ${facts.model ? "read" : "MISSING, baseline kept"}, uid ${uid ?? "not derived"})`;
 
-  console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now, "| identity:", identitySource, "serial:", robot.serialNumber, "model:", robot.model);
+  console.log("[decision] in:", { pointId, action, scope, validUntil, issuer: presentedIssuer ?? "(absent, defaulted)" }, "-> issuer:", robot.taskAuthIssuer, "scopes:", robot.taskAuthScopes, "actions:", robot.taskAuthActions, "validUntil:", robot.taskAuthValidUntil, "now:", now, "| identity:", identitySource, "serial:", robot.serialNumber, "model:", robot.model, "| payload:", payloadSource, robot.hasPayloadCredential ? `${robot.payloadType} ${robot.payloadOrigin}>${robot.payloadDestination}` : "none", Object.keys(deskFields).length ? deskFields : "");
 
   const authorizeBody = {
     actionId: "passCheckpoint",
     robot,
-    task: baselineTask(String(pointId), now),
+    task: { ...baselineTask(String(pointId), now), ...deskFields },
     now,
     enabledPolicies: [],
     disabledConditions: [],
@@ -193,6 +226,7 @@ app.post("/decision", async (req: Request, res: Response) => {
       allowed: d.decision === "permit",
       decision: d.decision,
       determiningPolicies: d.determiningPolicies ?? [],
+      payload: payloadSource,
       layer1: d.layer1,
       siteLists: d.siteLists,
       stages: d.stages,
